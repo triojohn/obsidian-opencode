@@ -23822,8 +23822,6 @@ var SessionExporter = class {
     var _a;
     let content = `---
 `;
-    content += `opencode-session: ${session.id}
-`;
     content += `opencode-session-id: ${session.id}
 `;
     content += `opencode-model: ${((_a = data.info.model) == null ? void 0 : _a.id) || "unknown"}

@@ -256,7 +256,7 @@ describe("OpenCode plugin in a fresh vault", function () {
 			const file = app.vault.getFiles().find((candidate: any) => candidate.name.endsWith("-opencode-fixture-session.md"));
 			return app.vault.read(file);
 		});
-		expect(exported).toContain("opencode-session: fixture-session");
+		expect(exported).toContain("opencode-session-id: fixture-session");
 		expect(exported).toContain("Fixture conversation message");
 	});
 

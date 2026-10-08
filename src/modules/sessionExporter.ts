@@ -78,7 +78,6 @@ export class SessionExporter {
 
 	private buildMarkdown(session: OpencodeSession, data: OpencodeExport): string {
 		let content = `---\n`;
-		content += `opencode-session: ${session.id}\n`;
 		content += `opencode-session-id: ${session.id}\n`;
 		content += `opencode-model: ${data.info.model?.id || "unknown"}\n`;
 		content += `opencode-agent: ${data.info.agent || "default"}\n`;
