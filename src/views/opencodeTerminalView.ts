@@ -323,6 +323,7 @@ export class OpencodeTerminalView extends ItemView {
 						updateTheme();
 						applyStatusBarPadding();
 						fitAddon.fit();
+						terminal.refresh(0, terminal.rows - 1);
 						this.ptySession.sendResize(terminal);
 					} catch (err) {
 						console.warn("Fit failed:", err);
@@ -574,6 +575,7 @@ export class OpencodeTerminalView extends ItemView {
 		const spawnWithCorrectSize = () => {
 			if (termContainer.clientWidth > 0 && termContainer.clientHeight > 0) {
 				try {
+					applyStatusBarPadding();
 					fitAddon.fit();
 				} catch (e) {
 					console.warn("Initial fit failed:", e);

@@ -23272,6 +23272,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
             updateTheme();
             applyStatusBarPadding();
             fitAddon.fit();
+            terminal.refresh(0, terminal.rows - 1);
             this.ptySession.sendResize(terminal);
           } catch (err) {
             console.warn("Fit failed:", err);
@@ -23509,6 +23510,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     const spawnWithCorrectSize = () => {
       if (termContainer.clientWidth > 0 && termContainer.clientHeight > 0) {
         try {
+          applyStatusBarPadding();
           fitAddon.fit();
         } catch (e) {
           console.warn("Initial fit failed:", e);
