@@ -249,11 +249,12 @@ describe("OpenCode plugin in a fresh vault", function () {
 			buttons.find((button) => button.textContent === "Export to note")?.click();
 		});
 		await browser.waitUntil(() => browser.execute(() => Boolean(
-			(window as any).app.vault.getAbstractFileByPath("OpenCode/Fixture session.md")
+			(window as any).app.vault.getFiles().find((file: any) => file.name.endsWith("-opencode-fixture-session.md"))
 		)), { timeoutMsg: "Exported session note was not created" });
 		const exported = await browser.execute(async () => {
 			const app = (window as any).app;
-			return app.vault.read(app.vault.getAbstractFileByPath("OpenCode/Fixture session.md"));
+			const file = app.vault.getFiles().find((candidate: any) => candidate.name.endsWith("-opencode-fixture-session.md"));
+			return app.vault.read(file);
 		});
 		expect(exported).toContain("opencode-session: fixture-session");
 		expect(exported).toContain("Fixture conversation message");

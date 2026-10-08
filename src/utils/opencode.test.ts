@@ -103,38 +103,70 @@ describe('OpencodeClient export with large sessions', () => {
 		expect(fs.unlinkSync).toHaveBeenCalled();
 	});
 
-	it('uses the formal OpenCode v2 session export command', async () => {
+	it('exports a formal OpenCode v2 session through the flat export API', async () => {
 		vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-		const mockProcess = createMockProcess();
-		mockSpawn.mockReturnValue(mockProcess.process);
-		vi.mocked(fs.statSync).mockReturnValue({ size: 1000 } as unknown as fs.Stats);
-		vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ info: {}, messages: [] }));
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
+			(callback as unknown as (error: null, stdout: string, stderr: string) => void)(null, JSON.stringify({
+				data: {
+					info: { model: { id: 'fixture-model' }, agent: 'fixture-agent', cost: 0.125, time: { created: 1, updated: 2 } },
+					messages: [
+						{ id: 'msg_1', type: 'user', time: { created: 1 }, text: 'Hi' },
+						{ id: 'msg_2', type: 'assistant', time: { created: 2 }, content: [
+							{ type: 'reasoning', text: 'thinking' },
+							{ type: 'tool', name: 'read' },
+							{ type: 'text', text: 'Hello' },
+						] },
+						{ id: 'idle_1', type: 'idle' },
+					],
+				},
+			}), '');
+			return {} as unknown as ChildProcess;
+		});
 
-		const promise = new OpencodeClient('opencode', '/tmp').exportSession('session-v2', 'v2');
-		expect(mockSpawn).toHaveBeenCalledWith(
-			expect.stringMatching(/^'opencode' 'session' 'export' 'session-v2' > /),
-			[],
-			expect.objectContaining({ cwd: '/tmp', shell: true }),
+		const result = await new OpencodeClient('opencode', '/tmp').exportSession('session-v2', 'v2');
+
+		expect(vi.mocked(execFile)).toHaveBeenCalledWith(
+			'opencode',
+			['api', 'get', '/api/experimental/session/session-v2/export'],
+			expect.objectContaining({ cwd: '/tmp' }),
+			expect.any(Function),
 		);
-		mockProcess.emitClose(0);
-		await expect(promise).resolves.toEqual({ info: {}, messages: [] });
+		expect(result).toMatchObject({
+			info: { agent: 'fixture-agent' },
+			messages: [
+				{
+					info: { role: 'user', id: 'msg_1', time: { created: 1 } },
+					parts: [{ type: 'text', text: 'Hi' }],
+				},
+				{
+					info: { role: 'assistant', id: 'msg_2', time: { created: 2 } },
+					parts: [
+						{ type: 'step-start' },
+						{ type: 'tool-call', name: 'read' },
+						{ type: 'text', text: 'Hello' },
+					],
+				},
+			],
+		});
 	});
 
-	it('keeps the preview OpenCode v2 export command as a fallback', async () => {
+	it('keeps the preview OpenCode v2 export on the same API path', async () => {
 		vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-		const mockProcess = createMockProcess();
-		mockSpawn.mockReturnValue(mockProcess.process);
-		vi.mocked(fs.statSync).mockReturnValue({ size: 1000 } as unknown as fs.Stats);
-		vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ info: {}, messages: [] }));
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
+			(callback as unknown as (error: null, stdout: string, stderr: string) => void)(null, JSON.stringify({
+				data: { info: {}, messages: [] },
+			}), '');
+			return {} as unknown as ChildProcess;
+		});
 
-		const promise = new OpencodeClient('opencode2', '/tmp').exportSession('session-preview', 'v2-preview');
-		expect(mockSpawn).toHaveBeenCalledWith(
-			expect.stringMatching(/^'opencode2' 'export' 'session-preview' > /),
-			[],
-			expect.objectContaining({ cwd: '/tmp', shell: true }),
+		await expect(new OpencodeClient('opencode2', '/tmp').exportSession('session-preview', 'v2-preview'))
+			.resolves.toMatchObject({ messages: [] });
+		expect(vi.mocked(execFile)).toHaveBeenCalledWith(
+			'opencode2',
+			['api', 'get', '/api/experimental/session/session-preview/export'],
+			expect.any(Object),
+			expect.any(Function),
 		);
-		mockProcess.emitClose(0);
-		await expect(promise).resolves.toEqual({ info: {}, messages: [] });
 	});
 
 	it('should return null on non-JSON output', async () => {

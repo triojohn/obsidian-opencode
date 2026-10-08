@@ -18,6 +18,29 @@ if (args[0] === "--help") {
 		}],
 		cursor: {},
 	}));
+} else if (process.env.OBSIDIAN_OPENCODE_V2 && args[0] === "api" && args[1] === "get" && args[2]?.startsWith("/api/experimental/session/") && args[2].endsWith("/export")) {
+	console.log(JSON.stringify({
+		data: {
+			info: {
+				id: args[2].split("/")[4],
+				model: { id: "fixture-model" },
+				agent: process.env.OBSIDIAN_OPENCODE_TEST_VARIABLE || "fixture-agent",
+				cost: 0.125,
+				time: { created: 1_700_000_000_000, updated: 1_700_000_001_000 },
+			},
+			messages: [{
+				id: "msg_user",
+				type: "user",
+				time: { created: 1_700_000_000_000 },
+				text: "Fixture conversation message",
+			}, {
+				id: "msg_assistant",
+				type: "assistant",
+				time: { created: 1_700_000_001_000 },
+				content: [{ type: "text", text: "Fixture agent response" }],
+			}],
+		},
+	}));
 } else if (args.slice(0, 2).join(" ") === "session list") {
 	if (process.env.OBSIDIAN_OPENCODE_V2) {
 		console.error("Unrecognized flag: --format in command opencode2");

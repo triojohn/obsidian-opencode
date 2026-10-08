@@ -204,6 +204,39 @@ function parseV2Messages(raw: string): OpencodeSessionMessage[] {
 	});
 }
 
+/**
+ * Normalize a flat OpenCode v2 session export into the stable
+ * `{info, messages:[{info, parts}]}` shape used by the note exporter.
+ *
+ * The v2 export returns flat messages: `user` messages carry a `text` field,
+ * `assistant` messages carry a `content` array of parts. Only user and
+ * assistant messages are kept; the rest (idle, system, model-switched…)
+ * carry no conversation text.
+ */
+function normalizeV2Export(data: unknown): OpencodeExport {
+	if (!isRecord(data) || !isRecord(data.info) || !Array.isArray(data.messages)) {
+		throw new Error("Expected an OpenCode v2 session export with info and messages");
+	}
+	const messages = data.messages.flatMap((value): OpencodeMessage[] => {
+		if (!isRecord(value) || (value.type !== "user" && value.type !== "assistant")) return [];
+		const created = isRecord(value.time) && typeof value.time.created === "number" ? value.time.created : 0;
+		const id = typeof value.id === "string" ? value.id : "";
+		const parts: Array<{ type: string; text?: string; name?: string }> = [];
+		if (typeof value.text === "string" && value.text) parts.push({ type: "text", text: value.text });
+		if (Array.isArray(value.content)) {
+			for (const part of value.content) {
+				if (!isRecord(part)) continue;
+				if (part.type === "text" && typeof part.text === "string") parts.push({ type: "text", text: part.text });
+				else if (part.type === "reasoning") parts.push({ type: "step-start" });
+				else if (part.type === "tool" && typeof part.name === "string") parts.push({ type: "tool-call", name: part.name });
+			}
+		}
+		const normalized = parts.map((part) => ({ id, sessionID: "", messageID: id, ...part }));
+		return [{ info: { role: value.type, id, sessionID: "", time: { created } }, parts: normalized }];
+	});
+	return { info: data.info as unknown as OpencodeExport["info"], messages };
+}
+
 interface ExecResult {
 	stdout: string;
 	stderr: string;
@@ -756,7 +789,9 @@ export class OpencodeClient {
 		generation: OpenCodeCliGeneration = "stable"
 	): Promise<OpencodeExport | null> {
 		try {
-			return await this.exportSessionStreamed(sessionId, generation);
+			return generation === "stable"
+				? await this.exportSessionStreamed(sessionId, generation)
+				: await this.exportV2Session(sessionId);
 		} catch (error) {
 			if (error instanceof ExportTooLargeError) {
 				console.warn("Session too large to preview:", sessionId);
@@ -766,6 +801,15 @@ export class OpencodeClient {
 			new Notice(`Failed to export session ${sessionId}`);
 			return null;
 		}
+	}
+
+	private async exportV2Session(sessionId: string, maxBytes = 200 * 1024 * 1024): Promise<OpencodeExport> {
+		if (!SAFE_ID_RE.test(sessionId)) throw new Error(`Invalid session ID: ${sessionId}`);
+		const raw = await this.commandRunner()(["api", "get", `/api/experimental/session/${sessionId}/export`]);
+		if (Buffer.byteLength(raw, "utf-8") > maxBytes) throw new ExportTooLargeError(sessionId);
+		const payload: unknown = JSON.parse(raw);
+		const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+		return normalizeV2Export(data);
 	}
 
 	private exportSessionStreamed(

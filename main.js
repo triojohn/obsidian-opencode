@@ -22379,6 +22379,29 @@ function parseV2Messages(raw) {
     return { role: value.type, created, text };
   });
 }
+function normalizeV2Export(data) {
+  if (!isRecord(data) || !isRecord(data.info) || !Array.isArray(data.messages)) {
+    throw new Error("Expected an OpenCode v2 session export with info and messages");
+  }
+  const messages = data.messages.flatMap((value) => {
+    if (!isRecord(value) || value.type !== "user" && value.type !== "assistant") return [];
+    const created = isRecord(value.time) && typeof value.time.created === "number" ? value.time.created : 0;
+    const id = typeof value.id === "string" ? value.id : "";
+    const parts = [];
+    if (typeof value.text === "string" && value.text) parts.push({ type: "text", text: value.text });
+    if (Array.isArray(value.content)) {
+      for (const part of value.content) {
+        if (!isRecord(part)) continue;
+        if (part.type === "text" && typeof part.text === "string") parts.push({ type: "text", text: part.text });
+        else if (part.type === "reasoning") parts.push({ type: "step-start" });
+        else if (part.type === "tool" && typeof part.name === "string") parts.push({ type: "tool-call", name: part.name });
+      }
+    }
+    const normalized = parts.map((part) => ({ id, sessionID: "", messageID: id, ...part }));
+    return [{ info: { role: value.type, id, sessionID: "", time: { created } }, parts: normalized }];
+  });
+  return { info: data.info, messages };
+}
 var WINDOWS_EXEC_HOST_JS = String.raw`
 const { spawn } = require("child_process");
 let [cwd, file, ...args] = process.argv.slice(1);
@@ -22841,7 +22864,7 @@ ${result.stderr}`;
   }
   async exportSession(sessionId, generation = "stable") {
     try {
-      return await this.exportSessionStreamed(sessionId, generation);
+      return generation === "stable" ? await this.exportSessionStreamed(sessionId, generation) : await this.exportV2Session(sessionId);
     } catch (error) {
       if (error instanceof ExportTooLargeError) {
         console.warn("Session too large to preview:", sessionId);
@@ -22851,6 +22874,14 @@ ${result.stderr}`;
       new import_obsidian3.Notice(`Failed to export session ${sessionId}`);
       return null;
     }
+  }
+  async exportV2Session(sessionId, maxBytes = 200 * 1024 * 1024) {
+    if (!SAFE_ID_RE.test(sessionId)) throw new Error(`Invalid session ID: ${sessionId}`);
+    const raw = await this.commandRunner()(["api", "get", `/api/experimental/session/${sessionId}/export`]);
+    if (Buffer.byteLength(raw, "utf-8") > maxBytes) throw new ExportTooLargeError(sessionId);
+    const payload = JSON.parse(raw);
+    const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+    return normalizeV2Export(data);
   }
   exportSessionStreamed(sessionId, generation, maxBytes = 200 * 1024 * 1024) {
     return new Promise((resolve4, reject) => {
@@ -23700,16 +23731,53 @@ var import_obsidian6 = require("obsidian");
 // src/modules/sessionExporter.ts
 var import_obsidian5 = require("obsidian");
 var moment = import_obsidian5.moment;
+var TRANSLITERATION = {
+  \u0430: "a",
+  \u0431: "b",
+  \u0432: "v",
+  \u0433: "g",
+  \u0434: "d",
+  \u0435: "e",
+  \u0451: "e",
+  \u0436: "zh",
+  \u0437: "z",
+  \u0438: "i",
+  \u0439: "y",
+  \u043A: "k",
+  \u043B: "l",
+  \u043C: "m",
+  \u043D: "n",
+  \u043E: "o",
+  \u043F: "p",
+  \u0440: "r",
+  \u0441: "s",
+  \u0442: "t",
+  \u0443: "u",
+  \u0444: "f",
+  \u0445: "h",
+  \u0446: "ts",
+  \u0447: "ch",
+  \u0448: "sh",
+  \u0449: "sch",
+  \u044A: "",
+  \u044B: "y",
+  \u044C: "",
+  \u044D: "e",
+  \u044E: "yu",
+  \u044F: "ya"
+};
 var SessionExporter = class {
   constructor(app) {
     this.app = app;
   }
   async exportToNote(session, data) {
-    const fileName = `OpenCode/${session.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\-_ ]/g, "_")}.md`;
-    const folder = "OpenCode";
-    try {
-      await this.app.vault.createFolder(folder);
-    } catch (e) {
+    const folder = this.resolveFolder();
+    const fileName = folder ? `${folder}/${this.buildFileName(session)}` : this.buildFileName(session);
+    if (folder) {
+      try {
+        await this.app.vault.createFolder(folder);
+      } catch (e) {
+      }
     }
     let content = this.buildMarkdown(session, data);
     try {
@@ -23726,11 +23794,37 @@ var SessionExporter = class {
       new import_obsidian5.Notice("Failed to create note");
     }
   }
+  /**
+   * Pick the note destination: the core daily-notes folder when that plugin
+   * is enabled, otherwise the vault root.
+   */
+  resolveFolder() {
+    var _a, _b, _c;
+    const internalPlugins = this.app.internalPlugins;
+    const plugin = (_a = internalPlugins == null ? void 0 : internalPlugins.getPluginById) == null ? void 0 : _a.call(internalPlugins, "daily-notes");
+    if (!(plugin == null ? void 0 : plugin.enabled)) return "";
+    const folder = (_c = (_b = plugin.instance) == null ? void 0 : _b.options) == null ? void 0 : _c.folder;
+    return typeof folder === "string" ? folder.replace(/^\/+|\/+$/g, "") : "";
+  }
+  /** `YYYY-MM-DD-opencode-<transliterated-slug>.md`. */
+  buildFileName(session) {
+    const date = moment(Date.now()).format("YYYY-MM-DD");
+    const slug = this.slugify(session.title) || `session-${session.id.slice(-6)}`;
+    return `${date}-opencode-${slug}.md`;
+  }
+  slugify(title) {
+    return title.toLowerCase().split("").map((char) => {
+      var _a;
+      return (_a = TRANSLITERATION[char]) != null ? _a : char;
+    }).join("").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
   buildMarkdown(session, data) {
     var _a;
     let content = `---
 `;
     content += `opencode-session: ${session.id}
+`;
+    content += `opencode-session-id: ${session.id}
 `;
     content += `opencode-model: ${((_a = data.info.model) == null ? void 0 : _a.id) || "unknown"}
 `;
