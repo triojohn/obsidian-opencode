@@ -2,6 +2,7 @@ export class SessionState {
 	sessionArgs: string[] | null = null;
 	sessionCwd: string | null = null;
 	pendingPrompt: string | null = null;
+	pendingAttachPath: string | null = null;
 
 	setNewSession(): void {
 		this.sessionArgs = [];

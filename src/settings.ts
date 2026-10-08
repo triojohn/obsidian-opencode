@@ -8,6 +8,7 @@ export interface OpencodePluginSettings {
 	terminalFontFamily: string;
 	newSessionArgs: string;
 	shiftEnterNewline: boolean;
+	resumeWithinDays: number;
 }
 
 export const DEFAULT_SETTINGS: OpencodePluginSettings = {
@@ -18,4 +19,5 @@ export const DEFAULT_SETTINGS: OpencodePluginSettings = {
 	terminalFontFamily: "monospace",
 	newSessionArgs: "",
 	shiftEnterNewline: false,
+	resumeWithinDays: 1,
 };

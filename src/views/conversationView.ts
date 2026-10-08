@@ -1,11 +1,15 @@
-import { ItemView, WorkspaceLeaf, Notice, moment as obsidianMoment, Modal, App, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, moment as obsidianMoment, Modal, App } from "obsidian";
 import type OpencodePlugin from "../main";
 import { OpencodeClient, OpencodeSession, OpencodeExport, ExportTooLargeError } from "../utils/opencode";
 import { SessionExporter } from "../modules/sessionExporter";
 import { sessionListErrorMessage } from "./conversationErrors";
 import { OpenCodeCliGeneration } from "../utils/opencodeExecutable";
+import { normalizeVaultPath } from "../utils/path";
 
 const moment: (input: number) => { format: (fmt: string) => string } = obsidianMoment;
+
+const SESSION_PAGE_LIMIT = 20;
+const SESSION_SCROLL_THRESHOLD = 200;
 
 export const OPENCODE_CONVERSATION_VIEW_TYPE = "opencode-conversations";
 
@@ -16,6 +20,9 @@ export class OpencodeConversationView extends ItemView {
 	private mainContainer: HTMLElement | null = null;
 	private exporter: SessionExporter;
 	private cliGeneration: OpenCodeCliGeneration = "stable";
+	private nextCursor: string | null = null;
+	private loadingMore = false;
+	private scrollHandler: (() => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: OpencodePlugin) {
 		super(leaf);
@@ -47,9 +54,6 @@ export class OpencodeConversationView extends ItemView {
 		const header = container.createDiv({ cls: "opencode-conversation-header" });
 		header.createEl("h3", { text: "Opencode sessions" });
 		const headerActions = header.createDiv({ cls: "opencode-conversation-header-actions" });
-		const newSessionBtn = headerActions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "New session" } });
-		setIcon(newSessionBtn, "plus");
-		newSessionBtn.addEventListener("click", () => { void this.plugin.newSession(); });
 		const refreshBtn = headerActions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Refresh sessions" } });
 		const svg = refreshBtn.createSvg("svg", { attr: { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" } });
 		svg.createSvg("path", { attr: { d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" } });
@@ -129,12 +133,14 @@ export class OpencodeConversationView extends ItemView {
 			event.preventDefault();
 		});
 
+		this.attachScrollListener();
 		await this.loadSessions();
 	}
 
 	async loadSessions() {
 		if (!this.listContainer) return;
 		this.listContainer.empty();
+		this.nextCursor = null;
 		this.mainContainer?.removeClass("is-error");
 		this.listContainer.createDiv({ cls: "opencode-loading", text: "Loading sessions..." });
 
@@ -142,7 +148,9 @@ export class OpencodeConversationView extends ItemView {
 			const client = this.createClient();
 			const compatibility = await client.checkCompatibility();
 			this.cliGeneration = compatibility.generation;
-			this.sessions = await client.listSessions(compatibility.generation);
+			const page = await client.listProjectSessionsPage(compatibility.generation, { limit: SESSION_PAGE_LIMIT });
+			this.sessions = page.sessions;
+			this.nextCursor = page.nextCursor;
 		} catch (error) {
 			console.error("Unable to load OpenCode sessions", error);
 			this.sessions = [];
@@ -159,19 +167,68 @@ export class OpencodeConversationView extends ItemView {
 
 		// Sort by updated desc
 		const sorted = [...this.sessions].sort((a, b) => b.updated - a.updated);
+		for (const session of sorted) this.renderSessionItem(session);
+	}
 
-		for (const session of sorted) {
-			const item = this.listContainer.createDiv({ cls: "opencode-session-item" });
-			item.createDiv({ cls: "opencode-session-title", text: session.title || "Untitled" });
-			const meta = item.createDiv({ cls: "opencode-session-meta" });
-			meta.createSpan({ text: moment(session.updated).format("YYYY-MM-DD HH:mm") });
+	private renderSessionItem(session: OpencodeSession): void {
+		if (!this.listContainer) return;
+		const item = this.listContainer.createDiv({ cls: "opencode-session-item" });
+		item.createDiv({ cls: "opencode-session-title", text: session.title || "Untitled" });
+		const meta = item.createDiv({ cls: "opencode-session-meta" });
+		meta.createSpan({ cls: "opencode-session-folder", text: this.sessionFolderLabel(session) });
+		meta.createSpan({ text: moment(session.updated).format("YYYY-MM-DD HH:mm") });
 
-			item.addEventListener("click", () => {
-				// Highlight selected
-				this.listContainer?.querySelectorAll(".opencode-session-item").forEach((el) => el.removeClass("is-active"));
-				item.addClass("is-active");
-				void this.showSessionDetail(session);
+		item.addEventListener("click", () => {
+			// Highlight selected
+			this.listContainer?.querySelectorAll(".opencode-session-item").forEach((el) => el.removeClass("is-active"));
+			item.addClass("is-active");
+			void this.showSessionDetail(session);
+		});
+	}
+
+	private sessionFolderLabel(session: OpencodeSession): string {
+		const relative = normalizeVaultPath(session.directory, this.plugin.vaultRoot);
+		if (!relative || relative === "." || relative === "./") return "vault";
+		return relative;
+	}
+
+	private attachScrollListener(): void {
+		const list = this.listContainer;
+		if (!list) return;
+		this.scrollHandler = () => {
+			if (!this.nextCursor || this.loadingMore) return;
+			if (list.scrollTop + list.clientHeight >= list.scrollHeight - SESSION_SCROLL_THRESHOLD) {
+				void this.loadMoreSessions();
+			}
+		};
+		list.addEventListener("scroll", this.scrollHandler);
+	}
+
+	private detachScrollListener(): void {
+		if (this.scrollHandler && this.listContainer) {
+			this.listContainer.removeEventListener("scroll", this.scrollHandler);
+		}
+		this.scrollHandler = null;
+	}
+
+	private async loadMoreSessions(): Promise<void> {
+		if (!this.listContainer || !this.nextCursor || this.loadingMore) return;
+		this.loadingMore = true;
+		try {
+			const page = await this.createClient().listProjectSessionsPage(this.cliGeneration, {
+				cursor: this.nextCursor,
+				limit: SESSION_PAGE_LIMIT,
 			});
+			this.nextCursor = page.nextCursor;
+			const sorted = [...page.sessions].sort((a, b) => b.updated - a.updated);
+			for (const session of sorted) {
+				this.sessions.push(session);
+				this.renderSessionItem(session);
+			}
+		} catch (error) {
+			console.error("Unable to load more OpenCode sessions", error);
+		} finally {
+			this.loadingMore = false;
 		}
 	}
 
@@ -288,7 +345,7 @@ export class OpencodeConversationView extends ItemView {
 	}
 
 	async onClose() {
-		// cleanup if needed
+		this.detachScrollListener();
 	}
 }
 

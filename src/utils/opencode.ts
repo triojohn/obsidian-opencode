@@ -140,6 +140,10 @@ function parseStableSessionList(raw: string): OpencodeSession[] {
 	return payload.map(parseSession);
 }
 
+function normalizeProjectPath(value: string): string {
+	return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
 function parseV2SessionPage(raw: string): { sessions: OpencodeSession[]; nextCursor?: string } {
 	const payload: unknown = JSON.parse(raw);
 	if (!isRecord(payload) || !Array.isArray(payload.data)) {
@@ -412,6 +416,7 @@ export class ExportTooLargeError extends Error {
 
 export class OpencodeClient {
 	private statusUpdatedAfter = Date.now();
+	private projectId: string | null = null;
 
 	constructor(
 		private opencodePath: string,
@@ -470,6 +475,50 @@ export class OpencodeClient {
 			if (error instanceof OpencodeError) throw error;
 			throw new MalformedCliOutputError(error);
 		}
+	}
+
+	/**
+	 * List one page of sessions for the whole project (every subfolder) of the
+	 * current working directory. v2 only; stable CLIs fall back to the flat list.
+	 */
+	async listProjectSessionsPage(
+		generation: OpenCodeCliGeneration,
+		options: { cursor?: string | null; limit?: number } = {}
+	): Promise<{ sessions: OpencodeSession[]; nextCursor: string | null }> {
+		const run = this.commandRunner();
+
+		try {
+			if (generation === "stable") {
+				return { sessions: await listStableSessions(run), nextCursor: null };
+			}
+			const projectId = await this.resolveProjectId(run);
+			if (!projectId) {
+				throw new Error(`No OpenCode project matches the working directory ${this.cwd}`);
+			}
+			const limit = options.limit ?? 20;
+			const query = `/api/session?project=${encodeURIComponent(projectId)}&parentID=null&limit=${limit}&order=desc`
+				+ (options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : "");
+			const page = parseV2SessionPage(await run(["api", "get", query]));
+			return { sessions: page.sessions, nextCursor: page.nextCursor ?? null };
+		} catch (error) {
+			if (error instanceof OpencodeError) throw error;
+			throw new MalformedCliOutputError(error);
+		}
+	}
+
+	private async resolveProjectId(run: SessionCommandRunner): Promise<string | null> {
+		if (this.projectId) return this.projectId;
+		const payload: unknown = JSON.parse(await run(["api", "get", "/api/project"]));
+		if (!Array.isArray(payload)) {
+			throw new Error("Expected an OpenCode v2 project list to be an array");
+		}
+		const target = normalizeProjectPath(this.cwd);
+		const match = payload.find((entry) =>
+			isRecord(entry) && typeof entry.canonical === "string" && normalizeProjectPath(entry.canonical) === target
+		);
+		if (!isRecord(match) || typeof match.id !== "string") return null;
+		this.projectId = match.id;
+		return this.projectId;
 	}
 
 	async listActiveSessions(): Promise<OpencodeActiveSession[]> {

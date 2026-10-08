@@ -67,6 +67,11 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				desc: "When enabled, Shift + Enter inserts a newline. The default OpenCode shortcut is Alt + Enter.",
 				control: { type: "toggle", key: "shiftEnterNewline" },
 			},
+			{
+				name: "Resume terminal within days",
+				desc: "When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.",
+				control: { type: "slider", key: "resumeWithinDays", min: 0, max: 30, step: 1 },
+			},
 		];
 	}
 
@@ -79,6 +84,7 @@ export class OpencodeSettingTab extends PluginSettingTab {
 			case "terminalFontFamily": return this.plugin.settings.terminalFontFamily;
 			case "newSessionArgs": return this.plugin.settings.newSessionArgs;
 			case "shiftEnterNewline": return this.plugin.settings.shiftEnterNewline;
+			case "resumeWithinDays": return this.plugin.settings.resumeWithinDays;
 			default: return undefined;
 		}
 	}
@@ -105,6 +111,9 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				break;
 			case "shiftEnterNewline":
 				if (typeof value === "boolean") this.plugin.settings.shiftEnterNewline = value;
+				break;
+			case "resumeWithinDays":
+				if (typeof value === "number") this.plugin.settings.resumeWithinDays = value;
 				break;
 			default:
 				return;
@@ -210,6 +219,19 @@ export class OpencodeSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.shiftEnterNewline)
 					.onChange(async (value) => {
 						this.plugin.settings.shiftEnterNewline = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Resume terminal within days")
+			.setDesc("When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.")
+			.addSlider((slider) =>
+				slider
+					.setLimits(0, 30, 1)
+					.setValue(this.plugin.settings.resumeWithinDays)
+					.onChange(async (value) => {
+						this.plugin.settings.resumeWithinDays = value;
 						await this.plugin.saveSettings();
 					})
 			);

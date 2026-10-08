@@ -20053,7 +20053,8 @@ var DEFAULT_SETTINGS = {
   terminalFontSize: 14,
   terminalFontFamily: "monospace",
   newSessionArgs: "",
-  shiftEnterNewline: false
+  shiftEnterNewline: false,
+  resumeWithinDays: 1
 };
 
 // src/settingsTab.ts
@@ -20192,6 +20193,11 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         name: "Shift + Enter for newline",
         desc: "When enabled, Shift + Enter inserts a newline. The default OpenCode shortcut is Alt + Enter.",
         control: { type: "toggle", key: "shiftEnterNewline" }
+      },
+      {
+        name: "Resume terminal within days",
+        desc: "When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.",
+        control: { type: "slider", key: "resumeWithinDays", min: 0, max: 30, step: 1 }
       }
     ];
   }
@@ -20211,6 +20217,8 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         return this.plugin.settings.newSessionArgs;
       case "shiftEnterNewline":
         return this.plugin.settings.shiftEnterNewline;
+      case "resumeWithinDays":
+        return this.plugin.settings.resumeWithinDays;
       default:
         return void 0;
     }
@@ -20237,6 +20245,9 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         break;
       case "shiftEnterNewline":
         if (typeof value === "boolean") this.plugin.settings.shiftEnterNewline = value;
+        break;
+      case "resumeWithinDays":
+        if (typeof value === "number") this.plugin.settings.resumeWithinDays = value;
         break;
       default:
         return;
@@ -20293,6 +20304,12 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Shift + Enter for newline").setDesc("When enabled, Shift + Enter inserts a newline. The default OpenCode shortcut is Alt + Enter.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.shiftEnterNewline).onChange(async (value) => {
         this.plugin.settings.shiftEnterNewline = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Resume terminal within days").setDesc("When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.").addSlider(
+      (slider) => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.resumeWithinDays).onChange(async (value) => {
+        this.plugin.settings.resumeWithinDays = value;
         await this.plugin.saveSettings();
       })
     );
@@ -21172,7 +21189,7 @@ var EditorServer = class {
     this.publishLock = (_a = options.publishLock) != null ? _a : true;
   }
   async start(vaultRoot) {
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       this.wss = new import_websocket_server.default({ port: 0 }, () => {
         const address = this.wss.address();
         if (typeof address === "object" && address !== null) {
@@ -21191,7 +21208,7 @@ var EditorServer = class {
           };
           fs2.writeFileSync(this.lockFilePath, JSON.stringify(lockContent, null, 2));
         }
-        resolve3(this.port);
+        resolve4(this.port);
       });
       this.wss.on("error", (err) => {
         reject(err);
@@ -21236,7 +21253,7 @@ var EditorServer = class {
     }
   }
   async stop() {
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       if (this.lockFilePath && fs2.existsSync(this.lockFilePath)) {
         fs2.unlinkSync(this.lockFilePath);
       }
@@ -21248,10 +21265,10 @@ var EditorServer = class {
       if (this.wss) {
         this.wss.close(() => {
           this.wss = null;
-          resolve3();
+          resolve4();
         });
       } else {
-        resolve3();
+        resolve4();
       }
     });
   }
@@ -21820,7 +21837,7 @@ function decodeBase64Utf8(encoded) {
   }
 }
 function runProcess(executable, args, input) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve4, reject) => {
     var _a;
     const child = (0, import_node_child_process.execFile)(executable, args, {
       encoding: "utf8",
@@ -21832,7 +21849,7 @@ function runProcess(executable, args, input) {
         reject(new Error(detail ? `${error.message}: ${detail}` : error.message));
         return;
       }
-      resolve3({ stdout: String(stdout), stderr: String(stderr) });
+      resolve4({ stdout: String(stdout), stderr: String(stderr) });
     });
     if (input !== void 0) (_a = child.stdin) == null ? void 0 : _a.end(input, "utf8");
   });
@@ -22288,6 +22305,9 @@ function parseStableSessionList(raw) {
   if (!Array.isArray(payload)) throw new Error("Expected a JSON array");
   return payload.map(parseSession);
 }
+function normalizeProjectPath(value) {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
 function parseV2SessionPage(raw) {
   const payload = JSON.parse(raw);
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
@@ -22349,7 +22369,7 @@ function windowsCommandReferences(tokens, env) {
   return { env: commandEnv, references };
 }
 function runExecFile(executable, args, opts) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve4, reject) => {
     var _a, _b;
     let file = process.platform === "win32" ? (_a = findExecutableOnPath(executable, { platform: "win32", environment: opts.env })) != null ? _a : executable : executable;
     let fileArgs = args;
@@ -22367,7 +22387,7 @@ function runExecFile(executable, args, opts) {
         if (stderr) failure.stderr = stderr.toString();
         reject(failure);
       } else {
-        resolve3({ stdout: (_a2 = stdout == null ? void 0 : stdout.toString()) != null ? _a2 : "", stderr: (_b2 = stderr == null ? void 0 : stderr.toString()) != null ? _b2 : "" });
+        resolve4({ stdout: (_a2 = stdout == null ? void 0 : stdout.toString()) != null ? _a2 : "", stderr: (_b2 = stderr == null ? void 0 : stderr.toString()) != null ? _b2 : "" });
       }
     });
   });
@@ -22510,6 +22530,7 @@ var OpencodeClient = class {
     this.cwd = cwd;
     this.environmentVariables = environmentVariables;
     this.statusUpdatedAfter = Date.now();
+    this.projectId = null;
   }
   resolvePath(environment = process.env) {
     return resolveOpencodeExecutable(this.opencodePath, { environment });
@@ -22556,6 +22577,44 @@ ${result.stderr}`;
       if (error instanceof OpencodeError) throw error;
       throw new MalformedCliOutputError(error);
     }
+  }
+  /**
+   * List one page of sessions for the whole project (every subfolder) of the
+   * current working directory. v2 only; stable CLIs fall back to the flat list.
+   */
+  async listProjectSessionsPage(generation, options = {}) {
+    var _a, _b;
+    const run = this.commandRunner();
+    try {
+      if (generation === "stable") {
+        return { sessions: await listStableSessions(run), nextCursor: null };
+      }
+      const projectId = await this.resolveProjectId(run);
+      if (!projectId) {
+        throw new Error(`No OpenCode project matches the working directory ${this.cwd}`);
+      }
+      const limit = (_a = options.limit) != null ? _a : 20;
+      const query = `/api/session?project=${encodeURIComponent(projectId)}&parentID=null&limit=${limit}&order=desc` + (options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : "");
+      const page = parseV2SessionPage(await run(["api", "get", query]));
+      return { sessions: page.sessions, nextCursor: (_b = page.nextCursor) != null ? _b : null };
+    } catch (error) {
+      if (error instanceof OpencodeError) throw error;
+      throw new MalformedCliOutputError(error);
+    }
+  }
+  async resolveProjectId(run) {
+    if (this.projectId) return this.projectId;
+    const payload = JSON.parse(await run(["api", "get", "/api/project"]));
+    if (!Array.isArray(payload)) {
+      throw new Error("Expected an OpenCode v2 project list to be an array");
+    }
+    const target = normalizeProjectPath(this.cwd);
+    const match = payload.find(
+      (entry) => isRecord(entry) && typeof entry.canonical === "string" && normalizeProjectPath(entry.canonical) === target
+    );
+    if (!isRecord(match) || typeof match.id !== "string") return null;
+    this.projectId = match.id;
+    return this.projectId;
   }
   async listActiveSessions() {
     const run = this.commandRunner();
@@ -22673,7 +22732,7 @@ ${result.stderr}`;
     }
   }
   exportSessionStreamed(sessionId, generation, maxBytes = 200 * 1024 * 1024) {
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       if (!SAFE_ID_RE.test(sessionId)) {
         reject(new Error(`Invalid session ID: ${sessionId}`));
         return;
@@ -22733,7 +22792,7 @@ ${result.stderr}`;
           const stdout = fs5.readFileSync(tmpFile, "utf-8");
           cleanup();
           const data = JSON.parse(stdout);
-          resolve3(data);
+          resolve4(data);
         } catch (parseError) {
           cleanup();
           reject(parseError instanceof Error ? parseError : new Error(String(parseError)));
@@ -23080,12 +23139,17 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     };
     let fitTimeout = null;
     const fitDelay = process.platform === "win32" ? 150 : 50;
+    const applyStatusBarPadding = () => {
+      const statusBar = container.ownerDocument.querySelector(".status-bar");
+      container.style.paddingBottom = statusBar ? `${statusBar.offsetHeight}px` : "0px";
+    };
     const doFit = () => {
       if (fitTimeout) window.clearTimeout(fitTimeout);
       fitTimeout = window.setTimeout(() => {
         if (termContainer.clientWidth > 0 && termContainer.clientHeight > 0) {
           try {
             updateTheme();
+            applyStatusBarPadding();
             fitAddon.fit();
             this.ptySession.sendResize(terminal);
           } catch (err) {
@@ -23463,6 +23527,14 @@ ${message}\r
       environmentVariables: this.plugin.settings.environmentVariables,
       editorPort: this.editorPort
     });
+    const attachPath = this.plugin.pendingAttachPath;
+    this.plugin.pendingAttachPath = null;
+    if (attachPath && this.ptySession.getStdin()) {
+      window.setTimeout(() => {
+        if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
+        terminal.input(`@${attachPath}`, true);
+      }, 1500);
+    }
   }
   async onClose() {
     var _a;
@@ -23598,6 +23670,8 @@ function sessionListErrorMessage(error) {
 
 // src/views/conversationView.ts
 var moment2 = import_obsidian6.moment;
+var SESSION_PAGE_LIMIT = 20;
+var SESSION_SCROLL_THRESHOLD = 200;
 var OPENCODE_CONVERSATION_VIEW_TYPE = "opencode-conversations";
 var OpencodeConversationView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
@@ -23608,6 +23682,9 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     this.detailContainer = null;
     this.mainContainer = null;
     this.cliGeneration = "stable";
+    this.nextCursor = null;
+    this.loadingMore = false;
+    this.scrollHandler = null;
     this.exporter = new SessionExporter(this.app);
   }
   createClient() {
@@ -23630,11 +23707,6 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     const header = container.createDiv({ cls: "opencode-conversation-header" });
     header.createEl("h3", { text: "Opencode sessions" });
     const headerActions = header.createDiv({ cls: "opencode-conversation-header-actions" });
-    const newSessionBtn = headerActions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "New session" } });
-    (0, import_obsidian6.setIcon)(newSessionBtn, "plus");
-    newSessionBtn.addEventListener("click", () => {
-      void this.plugin.newSession();
-    });
     const refreshBtn = headerActions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Refresh sessions" } });
     const svg = refreshBtn.createSvg("svg", { attr: { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" } });
     svg.createSvg("path", { attr: { d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" } });
@@ -23710,19 +23782,23 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
       resizeList(this.listContainer.getBoundingClientRect().width + direction * 16);
       event.preventDefault();
     });
+    this.attachScrollListener();
     await this.loadSessions();
   }
   async loadSessions() {
     var _a;
     if (!this.listContainer) return;
     this.listContainer.empty();
+    this.nextCursor = null;
     (_a = this.mainContainer) == null ? void 0 : _a.removeClass("is-error");
     this.listContainer.createDiv({ cls: "opencode-loading", text: "Loading sessions..." });
     try {
       const client = this.createClient();
       const compatibility = await client.checkCompatibility();
       this.cliGeneration = compatibility.generation;
-      this.sessions = await client.listSessions(compatibility.generation);
+      const page = await client.listProjectSessionsPage(compatibility.generation, { limit: SESSION_PAGE_LIMIT });
+      this.sessions = page.sessions;
+      this.nextCursor = page.nextCursor;
     } catch (error) {
       console.error("Unable to load OpenCode sessions", error);
       this.sessions = [];
@@ -23735,17 +23811,62 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
       return;
     }
     const sorted = [...this.sessions].sort((a, b) => b.updated - a.updated);
-    for (const session of sorted) {
-      const item = this.listContainer.createDiv({ cls: "opencode-session-item" });
-      item.createDiv({ cls: "opencode-session-title", text: session.title || "Untitled" });
-      const meta = item.createDiv({ cls: "opencode-session-meta" });
-      meta.createSpan({ text: moment2(session.updated).format("YYYY-MM-DD HH:mm") });
-      item.addEventListener("click", () => {
-        var _a2;
-        (_a2 = this.listContainer) == null ? void 0 : _a2.querySelectorAll(".opencode-session-item").forEach((el) => el.removeClass("is-active"));
-        item.addClass("is-active");
-        void this.showSessionDetail(session);
+    for (const session of sorted) this.renderSessionItem(session);
+  }
+  renderSessionItem(session) {
+    if (!this.listContainer) return;
+    const item = this.listContainer.createDiv({ cls: "opencode-session-item" });
+    item.createDiv({ cls: "opencode-session-title", text: session.title || "Untitled" });
+    const meta = item.createDiv({ cls: "opencode-session-meta" });
+    meta.createSpan({ cls: "opencode-session-folder", text: this.sessionFolderLabel(session) });
+    meta.createSpan({ text: moment2(session.updated).format("YYYY-MM-DD HH:mm") });
+    item.addEventListener("click", () => {
+      var _a;
+      (_a = this.listContainer) == null ? void 0 : _a.querySelectorAll(".opencode-session-item").forEach((el) => el.removeClass("is-active"));
+      item.addClass("is-active");
+      void this.showSessionDetail(session);
+    });
+  }
+  sessionFolderLabel(session) {
+    const relative3 = normalizeVaultPath(session.directory, this.plugin.vaultRoot);
+    if (!relative3 || relative3 === "." || relative3 === "./") return "vault";
+    return relative3;
+  }
+  attachScrollListener() {
+    const list = this.listContainer;
+    if (!list) return;
+    this.scrollHandler = () => {
+      if (!this.nextCursor || this.loadingMore) return;
+      if (list.scrollTop + list.clientHeight >= list.scrollHeight - SESSION_SCROLL_THRESHOLD) {
+        void this.loadMoreSessions();
+      }
+    };
+    list.addEventListener("scroll", this.scrollHandler);
+  }
+  detachScrollListener() {
+    if (this.scrollHandler && this.listContainer) {
+      this.listContainer.removeEventListener("scroll", this.scrollHandler);
+    }
+    this.scrollHandler = null;
+  }
+  async loadMoreSessions() {
+    if (!this.listContainer || !this.nextCursor || this.loadingMore) return;
+    this.loadingMore = true;
+    try {
+      const page = await this.createClient().listProjectSessionsPage(this.cliGeneration, {
+        cursor: this.nextCursor,
+        limit: SESSION_PAGE_LIMIT
       });
+      this.nextCursor = page.nextCursor;
+      const sorted = [...page.sessions].sort((a, b) => b.updated - a.updated);
+      for (const session of sorted) {
+        this.sessions.push(session);
+        this.renderSessionItem(session);
+      }
+    } catch (error) {
+      console.error("Unable to load more OpenCode sessions", error);
+    } finally {
+      this.loadingMore = false;
     }
   }
   renderSessionListError(error) {
@@ -23852,6 +23973,7 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     }
   }
   async onClose() {
+    this.detachScrollListener();
   }
 };
 var ConfirmDeleteModal = class extends import_obsidian6.Modal {
@@ -23938,6 +24060,7 @@ var SessionState = class {
     this.sessionArgs = null;
     this.sessionCwd = null;
     this.pendingPrompt = null;
+    this.pendingAttachPath = null;
   }
   setNewSession() {
     this.sessionArgs = [];
@@ -24269,30 +24392,30 @@ function unixTerminalSize(terminal) {
 }
 function childExit(child) {
   if (!child || !child.pid || child.exitCode != null || child.signalCode != null) return Promise.resolve();
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const finish = () => {
       child.removeListener("exit", finish);
-      resolve3();
+      resolve4();
     };
     child.once("exit", finish);
   });
 }
 function childClose(child) {
   if (!child.pid || child.exitCode != null || child.signalCode != null) return Promise.resolve();
-  return new Promise((resolve3) => {
-    child.once("close", resolve3);
+  return new Promise((resolve4) => {
+    child.once("close", resolve4);
   });
 }
 function withTimeout(promise, timeoutMs) {
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const timeoutWindow = window;
-    const timeout = timeoutWindow.setTimeout(() => resolve3(null), timeoutMs);
+    const timeout = timeoutWindow.setTimeout(() => resolve4(null), timeoutMs);
     promise.then((value) => {
       timeoutWindow.clearTimeout(timeout);
-      resolve3(value);
+      resolve4(value);
     }, () => {
       timeoutWindow.clearTimeout(timeout);
-      resolve3(null);
+      resolve4(null);
     });
   });
 }
@@ -24489,7 +24612,7 @@ Error: ${err.message}\r
       if (this.backend === 1 /* WindowsConPty */ && ptyProcess.pid) {
         const ptyExited = childExit(ptyProcess);
         const jobExited = childExit(windowsJobProcess);
-        const taskkillSucceeded = await new Promise((resolve3) => {
+        const taskkillSucceeded = await new Promise((resolve4) => {
           const timeoutWindow = window;
           let settled = false;
           let taskkill = null;
@@ -24498,7 +24621,7 @@ Error: ${err.message}\r
             settled = true;
             timeoutWindow.clearTimeout(timeout);
             if (!succeeded) taskkill == null ? void 0 : taskkill.kill();
-            resolve3(succeeded);
+            resolve4(succeeded);
           };
           const timeout = timeoutWindow.setTimeout(() => finish(false), 5e3);
           try {
@@ -24713,6 +24836,9 @@ var OPENCODE_ICON_SVG = `
 </g>`;
 
 // src/main.ts
+function normalizeDirectory(directory) {
+  return path10.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
+}
 var OpencodePlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
@@ -24725,12 +24851,19 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.statusBadge = null;
     this.statusRefreshPending = false;
     this.unloading = false;
+    this.lastActiveMarkdownFile = null;
   }
   get pendingPrompt() {
     return this.sessionState.pendingPrompt;
   }
   set pendingPrompt(value) {
     this.sessionState.pendingPrompt = value;
+  }
+  get pendingAttachPath() {
+    return this.sessionState.pendingAttachPath;
+  }
+  set pendingAttachPath(value) {
+    this.sessionState.pendingAttachPath = value;
   }
   get sessionArgs() {
     return this.sessionState.sessionArgs;
@@ -24757,6 +24890,10 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       this.vaultRoot = "/";
     }
     this.vaultConfigDir = this.app.vault.configDir;
+    this.lastActiveMarkdownFile = this.app.workspace.getActiveFile();
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      if (file && file.extension === "md") this.lastActiveMarkdownFile = file;
+    }));
     this.setupStatusBar();
     this.registerView(
       OPENCODE_TERMINAL_VIEW_TYPE,
@@ -24768,7 +24905,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     );
     (0, import_obsidian10.addIcon)(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
     this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt) => {
-      void this.activateTerminalView();
+      void this.openActiveNoteTerminal();
     });
     this.addRibbonIcon("message-circle", "Opencode conversations", (evt) => {
       void this.activateConversationView();
@@ -24953,6 +25090,51 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   async openTerminalWithSession(sessionId, directory) {
     this.sessionState.setOpenSession(sessionId, directory);
     await this.openOrRestartTerminal();
+  }
+  /**
+   * Open the terminal rooted at the active note's folder.
+   *
+   * Resumes the folder's most recently updated session when it falls within
+   * `resumeWithinDays`, otherwise starts a new session and pre-fills the
+   * active note as an `@path` mention in the composer.
+   */
+  async openActiveNoteTerminal() {
+    var _a;
+    const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
+    const cwd = file ? path10.join(this.vaultRoot, path10.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
+    const resumeId = await this.findResumableSession(cwd);
+    if (resumeId) {
+      this.sessionState.setOpenSession(resumeId, cwd);
+    } else {
+      this.sessionState.setNewSession();
+      this.sessionCwd = cwd;
+      this.pendingAttachPath = file ? file.path : null;
+    }
+    await this.openOrRestartTerminal();
+  }
+  async findResumableSession(cwd) {
+    var _a;
+    try {
+      const client = new OpencodeClient(
+        this.settings.opencodePath || "opencode",
+        cwd,
+        this.settings.environmentVariables
+      );
+      const compatibility = await client.checkCompatibility();
+      const sessions = await client.listSessions(compatibility.generation);
+      const target = normalizeDirectory(cwd);
+      const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
+      let latest = null;
+      for (const session of sessions) {
+        if (normalizeDirectory(session.directory) !== target) continue;
+        if (session.updated < threshold) continue;
+        if (!latest || session.updated > latest.updated) latest = session;
+      }
+      return (_a = latest == null ? void 0 : latest.id) != null ? _a : null;
+    } catch (error) {
+      console.debug("Unable to resolve a resumable OpenCode session", error);
+      return null;
+    }
   }
   async openOrRestartTerminal() {
     await this.viewCoordinator.openOrRestartTerminal(async () => {

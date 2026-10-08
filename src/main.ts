@@ -11,8 +11,16 @@ import { PtySession } from "./modules/ptySession";
 import { PtySessionRegistry } from "./modules/ptySessionRegistry";
 import { OpencodeActivitySource, OpencodeStatus, OpencodeStatusTracker } from "./modules/opencodeStatus";
 import { OpencodeClient } from "./utils/opencode";
+import type { OpencodeSession } from "./utils/opencode";
 import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
+
+/**
+ * Normalize a directory for comparison across case and trailing separators.
+ */
+function normalizeDirectory(directory: string): string {
+	return path.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
+}
 
 export default class OpencodePlugin extends Plugin {
 	settings: OpencodePluginSettings;
@@ -27,6 +35,7 @@ export default class OpencodePlugin extends Plugin {
 	private statusBadge: HTMLSpanElement | null = null;
 	private statusRefreshPending = false;
 	private unloading = false;
+	private lastActiveMarkdownFile: TFile | null = null;
 
 	get pendingPrompt(): string | null {
 		return this.sessionState.pendingPrompt;
@@ -34,6 +43,14 @@ export default class OpencodePlugin extends Plugin {
 
 	set pendingPrompt(value: string | null) {
 		this.sessionState.pendingPrompt = value;
+	}
+
+	get pendingAttachPath(): string | null {
+		return this.sessionState.pendingAttachPath;
+	}
+
+	set pendingAttachPath(value: string | null) {
+		this.sessionState.pendingAttachPath = value;
 	}
 
 	get sessionArgs(): string[] | null {
@@ -66,6 +83,10 @@ export default class OpencodePlugin extends Plugin {
 			this.vaultRoot = "/";
 		}
 		this.vaultConfigDir = this.app.vault.configDir;
+		this.lastActiveMarkdownFile = this.app.workspace.getActiveFile();
+		this.registerEvent(this.app.workspace.on("file-open", (file) => {
+			if (file && file.extension === "md") this.lastActiveMarkdownFile = file;
+		}));
 		this.setupStatusBar();
 
 		this.registerView(
@@ -80,7 +101,7 @@ export default class OpencodePlugin extends Plugin {
 
 		addIcon(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
 		this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt: MouseEvent) => {
-			void this.activateTerminalView();
+			void this.openActiveNoteTerminal();
 		});
 
 		this.addRibbonIcon("message-circle", "Opencode conversations", (evt: MouseEvent) => {
@@ -279,6 +300,56 @@ export default class OpencodePlugin extends Plugin {
 	async openTerminalWithSession(sessionId: string, directory: string) {
 		this.sessionState.setOpenSession(sessionId, directory);
 		await this.openOrRestartTerminal();
+	}
+
+	/**
+	 * Open the terminal rooted at the active note's folder.
+	 *
+	 * Resumes the folder's most recently updated session when it falls within
+	 * `resumeWithinDays`, otherwise starts a new session and pre-fills the
+	 * active note as an `@path` mention in the composer.
+	 */
+	async openActiveNoteTerminal(): Promise<void> {
+		const file = this.app.workspace.getActiveFile() ?? this.lastActiveMarkdownFile;
+		const cwd = file
+			? path.join(this.vaultRoot, path.dirname(file.path))
+			: this.settings.defaultWorkingDirectory || this.vaultRoot;
+
+		const resumeId = await this.findResumableSession(cwd);
+		if (resumeId) {
+			this.sessionState.setOpenSession(resumeId, cwd);
+		} else {
+			this.sessionState.setNewSession();
+			this.sessionCwd = cwd;
+			this.pendingAttachPath = file ? file.path : null;
+		}
+
+		await this.openOrRestartTerminal();
+	}
+
+	private async findResumableSession(cwd: string): Promise<string | null> {
+		try {
+			const client = new OpencodeClient(
+				this.settings.opencodePath || "opencode",
+				cwd,
+				this.settings.environmentVariables,
+			);
+			const compatibility = await client.checkCompatibility();
+			const sessions = await client.listSessions(compatibility.generation);
+			const target = normalizeDirectory(cwd);
+			const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
+
+			let latest: OpencodeSession | null = null;
+			for (const session of sessions) {
+				if (normalizeDirectory(session.directory) !== target) continue;
+				if (session.updated < threshold) continue;
+				if (!latest || session.updated > latest.updated) latest = session;
+			}
+			return latest?.id ?? null;
+		} catch (error) {
+			console.debug("Unable to resolve a resumable OpenCode session", error);
+			return null;
+		}
 	}
 
 	private async openOrRestartTerminal() {

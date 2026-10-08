@@ -309,12 +309,19 @@ export class OpencodeTerminalView extends ItemView {
 		// Debounced fit function to avoid excessive calls
 		let fitTimeout: number | null = null;
 		const fitDelay = process.platform === "win32" ? 150 : 50;
+		// Obsidian's status bar overlays the bottom of the leaf; reserve its height
+		// so the TUI's last row stays visible.
+		const applyStatusBarPadding = () => {
+			const statusBar = container.ownerDocument.querySelector<HTMLElement>(".status-bar");
+			container.style.paddingBottom = statusBar ? `${statusBar.offsetHeight}px` : "0px";
+		};
 		const doFit = () => {
 			if (fitTimeout) window.clearTimeout(fitTimeout);
 			fitTimeout = window.setTimeout(() => {
 				if (termContainer.clientWidth > 0 && termContainer.clientHeight > 0) {
 					try {
 						updateTheme();
+						applyStatusBarPadding();
 						fitAddon.fit();
 						this.ptySession.sendResize(terminal);
 					} catch (err) {
@@ -720,6 +727,17 @@ export class OpencodeTerminalView extends ItemView {
 			environmentVariables: this.plugin.settings.environmentVariables,
 			editorPort: this.editorPort,
 		});
+
+		// Pre-fill the active note as an @mention for a freshly opened session.
+		// No Enter: the mention menu stays open for the user to confirm.
+		const attachPath = this.plugin.pendingAttachPath;
+		this.plugin.pendingAttachPath = null;
+		if (attachPath && this.ptySession.getStdin()) {
+			window.setTimeout(() => {
+				if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
+				terminal.input(`@${attachPath}`, true);
+			}, 1500);
+		}
 	}
 
 	async onClose() {
