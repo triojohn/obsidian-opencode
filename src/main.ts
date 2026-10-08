@@ -1,4 +1,4 @@
-import { Plugin, FileSystemAdapter, Notice, Platform, addIcon, setIcon, TFile } from "obsidian";
+import { Plugin, FileSystemAdapter, Notice, Platform, addIcon, setIcon, TFile, TFolder } from "obsidian";
 import * as path from "node:path";
 import { OpencodePluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { OpencodeSettingTab } from "./settingsTab";
@@ -116,6 +116,16 @@ export default class OpencodePlugin extends Plugin {
 		this.addRibbonIcon("message-circle", "Opencode conversations", (evt: MouseEvent) => {
 			void this.activateConversationView();
 		});
+
+		this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+			if (!(file instanceof TFile) && !(file instanceof TFolder)) return;
+			menu.addSeparator();
+			menu.addItem((item) => item
+				.setTitle("Открыть в Opencode")
+				.setIcon("terminal")
+				.onClick(() => { void this.openTerminalForFileMenu(file); }));
+			menu.addSeparator();
+		}));
 
 		this.addCommand({
 			id: "open-terminal",
@@ -324,6 +334,16 @@ export default class OpencodePlugin extends Plugin {
 			? path.join(this.vaultRoot, path.dirname(file.path))
 			: this.settings.defaultWorkingDirectory || this.vaultRoot;
 
+		await this.openTerminalForTarget(cwd, file ? file.path : null);
+	}
+
+	/**
+	 * Open the terminal rooted at `cwd`, resuming the folder's most recently
+	 * updated session within `resumeWithinDays`, otherwise starting a new
+	 * session pre-filled with `attachPath` (vault-relative) as an `@path`
+	 * mention in the composer.
+	 */
+	async openTerminalForTarget(cwd: string, attachPath: string | null): Promise<void> {
 		const sessions = await this.listFolderSessions(cwd);
 		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
 		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
@@ -343,10 +363,23 @@ export default class OpencodePlugin extends Plugin {
 		} else {
 			this.sessionState.setNewSession();
 			this.sessionCwd = cwd;
-			this.pendingAttachPath = file ? file.path : null;
+			this.pendingAttachPath = attachPath;
 		}
 
 		await this.openOrRestartTerminal();
+	}
+
+	/**
+	 * Open the terminal for a file-explorer context-menu entry: folders open
+	 * rooted at the folder, files open rooted at their parent folder with the
+	 * file attached as an `@path` mention on a new session.
+	 */
+	private async openTerminalForFileMenu(file: TFile | TFolder): Promise<void> {
+		if (file instanceof TFolder) {
+			await this.openTerminalForTarget(path.join(this.vaultRoot, file.path), null);
+			return;
+		}
+		await this.openTerminalForTarget(path.join(this.vaultRoot, path.dirname(file.path)), file.path);
 	}
 
 	private async listFolderSessions(cwd: string): Promise<OpencodeSession[]> {

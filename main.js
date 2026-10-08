@@ -20043,7 +20043,7 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
-var path10 = __toESM(require("node:path"));
+var path11 = __toESM(require("node:path"));
 
 // src/settings.ts
 var DEFAULT_SETTINGS = {
@@ -20054,7 +20054,8 @@ var DEFAULT_SETTINGS = {
   terminalFontFamily: "monospace",
   newSessionArgs: "",
   shiftEnterNewline: false,
-  resumeWithinDays: 1
+  resumeWithinDays: 1,
+  recentTabsCount: 5
 };
 
 // src/settingsTab.ts
@@ -20198,6 +20199,11 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         name: "Resume terminal within days",
         desc: "When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.",
         control: { type: "slider", key: "resumeWithinDays", min: 0, max: 30, step: 1 }
+      },
+      {
+        name: "Recent session tabs",
+        desc: "When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.",
+        control: { type: "slider", key: "recentTabsCount", min: 0, max: 20, step: 1 }
       }
     ];
   }
@@ -20219,6 +20225,8 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         return this.plugin.settings.shiftEnterNewline;
       case "resumeWithinDays":
         return this.plugin.settings.resumeWithinDays;
+      case "recentTabsCount":
+        return this.plugin.settings.recentTabsCount;
       default:
         return void 0;
     }
@@ -20248,6 +20256,9 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         break;
       case "resumeWithinDays":
         if (typeof value === "number") this.plugin.settings.resumeWithinDays = value;
+        break;
+      case "recentTabsCount":
+        if (typeof value === "number") this.plugin.settings.recentTabsCount = value;
         break;
       default:
         return;
@@ -20310,6 +20321,12 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Resume terminal within days").setDesc("When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.").addSlider(
       (slider) => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.resumeWithinDays).onChange(async (value) => {
         this.plugin.settings.resumeWithinDays = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Recent session tabs").setDesc("When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.").addSlider(
+      (slider) => slider.setLimits(0, 20, 1).setValue(this.plugin.settings.recentTabsCount).onChange(async (value) => {
+        this.plugin.settings.recentTabsCount = value;
         await this.plugin.saveSettings();
       })
     );
@@ -23074,9 +23091,9 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     const terminalLinks = new TerminalLinks(terminal, {
       vaultRoot: this.plugin.vaultRoot,
       wslDistro: terminalEnvironment.WSL_DISTRO_NAME,
-      hasNote: (path11) => {
+      hasNote: (path12) => {
         var _a2;
-        return Boolean(((_a2 = this.app.vault.getFileByPath(path11)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
+        return Boolean(((_a2 = this.app.vault.getFileByPath(path12)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
       },
       isModEvent: (event) => Boolean(import_obsidian4.Keymap.isModEvent(event)),
       openExternal: (url) => {
@@ -23552,8 +23569,10 @@ ${message}\r
     } else {
       args = this.plugin.settings.newSessionArgs ? this.plugin.settings.newSessionArgs.split(/\s+/).filter(Boolean) : [];
     }
+    const routeSessionId = this.plugin.pendingRouteSessionId;
     this.plugin.sessionArgs = null;
     this.plugin.sessionCwd = null;
+    this.plugin.pendingRouteSessionId = null;
     if (this.plugin.pendingPrompt) {
       args.push("--prompt", this.plugin.pendingPrompt);
       this.plugin.pendingPrompt = null;
@@ -23563,7 +23582,8 @@ ${message}\r
       cwd,
       args,
       environmentVariables: this.plugin.settings.environmentVariables,
-      editorPort: this.editorPort
+      editorPort: this.editorPort,
+      routeSessionId: routeSessionId != null ? routeSessionId : void 0
     });
     const attachPath = this.plugin.pendingAttachPath;
     this.plugin.pendingAttachPath = null;
@@ -24109,18 +24129,22 @@ var SessionState = class {
     this.sessionCwd = null;
     this.pendingPrompt = null;
     this.pendingAttachPath = null;
+    this.pendingRouteSessionId = null;
   }
   setNewSession() {
     this.sessionArgs = [];
     this.sessionCwd = null;
+    this.pendingRouteSessionId = null;
   }
   setContinueLastSession() {
     this.sessionArgs = ["-c"];
     this.sessionCwd = null;
+    this.pendingRouteSessionId = null;
   }
   setOpenSession(sessionId, directory) {
     this.sessionArgs = ["-s", sessionId];
     this.sessionCwd = directory;
+    this.pendingRouteSessionId = null;
   }
   setPendingPrompt(prompt) {
     this.pendingPrompt = prompt;
@@ -24508,6 +24532,9 @@ var PtySession = class {
     if (options.editorPort) {
       env.OPENCODE_EDITOR_SSE_PORT = String(options.editorPort);
     }
+    if (options.routeSessionId) {
+      env.OPENCODE_ROUTE = JSON.stringify({ type: "session", sessionID: options.routeSessionId });
+    }
     env.OPENCODE_PTY_INITIAL_SIZE = unixTerminalSize(terminal);
     if (isFlatpak) {
       env.OPENCODE_PTY_KILL_TOKEN = killToken;
@@ -24883,9 +24910,72 @@ var OPENCODE_ICON_SVG = `
 	<path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" />
 </g>`;
 
+// src/utils/sessionTabs.ts
+var fs7 = __toESM(require("fs"));
+var os7 = __toESM(require("os"));
+var path10 = __toESM(require("path"));
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function resolveChannelDirectory() {
+  const root = path10.join(os7.homedir(), ".local", "state", "opencode");
+  const latest = path10.join(root, "latest");
+  if (fs7.existsSync(latest)) return latest;
+  try {
+    const dirs = fs7.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    if (dirs.length === 1) return path10.join(root, dirs[0]);
+  } catch (e) {
+  }
+  return latest;
+}
+function tabsFilePath() {
+  return path10.join(resolveChannelDirectory(), "tui", "tabs.json");
+}
+function coerceTab(value) {
+  if (!isRecord2(value) || typeof value.sessionID !== "string") return null;
+  const title = typeof value.title === "string" ? value.title : value.sessionID;
+  return { sessionID: value.sessionID, title };
+}
+function mergeSessionTabs(cwd, sessions) {
+  try {
+    const wanted = sessions.filter((session) => session.id && session.id !== "new");
+    if (wanted.length === 0) return;
+    const file = tabsFilePath();
+    let parsed = {};
+    try {
+      const raw = JSON.parse(fs7.readFileSync(file, "utf8"));
+      if (isRecord2(raw)) parsed = raw;
+    } catch (e) {
+      parsed = {};
+    }
+    const cwdMap = isRecord2(parsed.cwd) ? parsed.cwd : {};
+    const existingBucket = isRecord2(cwdMap[cwd]) ? cwdMap[cwd] : {};
+    const existingTabs = Array.isArray(existingBucket.tabs) ? existingBucket.tabs.map(coerceTab).filter((tab) => tab !== null) : [];
+    const known = new Set(existingTabs.map((tab) => tab.sessionID));
+    const merged = [...existingTabs];
+    for (const session of wanted) {
+      if (known.has(session.id)) continue;
+      merged.push({ sessionID: session.id, title: session.title || session.id });
+      known.add(session.id);
+    }
+    if (merged.length === existingTabs.length) return;
+    const bucket = { ...existingBucket, tabs: merged };
+    if (!isRecord2(bucket.unread)) delete bucket.unread;
+    cwdMap[cwd] = bucket;
+    parsed.cwd = cwdMap;
+    if (!isRecord2(parsed.global)) parsed.global = { tabs: [], unread: {} };
+    fs7.mkdirSync(path10.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.tmp`;
+    fs7.writeFileSync(temp, JSON.stringify(parsed, null, 2));
+    fs7.renameSync(temp, file);
+  } catch (error) {
+    console.debug("Unable to merge OpenCode session tabs", error);
+  }
+}
+
 // src/main.ts
 function normalizeDirectory(directory) {
-  return path10.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
+  return path11.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
 var OpencodePlugin = class extends import_obsidian10.Plugin {
   constructor() {
@@ -24925,6 +25015,12 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   set sessionCwd(value) {
     this.sessionState.sessionCwd = value;
   }
+  get pendingRouteSessionId() {
+    return this.sessionState.pendingRouteSessionId;
+  }
+  set pendingRouteSessionId(value) {
+    this.sessionState.pendingRouteSessionId = value;
+  }
   async onload() {
     this.sessionState = new SessionState();
     this.viewCoordinator = new ViewCoordinator(this.app.workspace, {
@@ -24958,6 +25054,14 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.addRibbonIcon("message-circle", "Opencode conversations", (evt) => {
       void this.activateConversationView();
     });
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof import_obsidian10.TFile) && !(file instanceof import_obsidian10.TFolder)) return;
+      menu.addSeparator();
+      menu.addItem((item) => item.setTitle("\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0432 Opencode").setIcon("terminal").onClick(() => {
+        void this.openTerminalForFileMenu(file);
+      }));
+      menu.addSeparator();
+    }));
     this.addCommand({
       id: "open-terminal",
       name: "Open terminal",
@@ -25107,7 +25211,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   }
   updateStatusActiveFile(file) {
     if (!this.statusTracker) return;
-    this.statusTracker.updateActiveFile(file ? path10.join(this.vaultRoot, file.path) : null);
+    this.statusTracker.updateActiveFile(file ? path11.join(this.vaultRoot, file.path) : null);
     this.renderStatus(this.statusTracker.status);
   }
   renderStatus(status) {
@@ -25149,19 +25253,49 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   async openActiveNoteTerminal() {
     var _a;
     const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
-    const cwd = file ? path10.join(this.vaultRoot, path10.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
-    const resumeId = await this.findResumableSession(cwd);
+    const cwd = file ? path11.join(this.vaultRoot, path11.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
+    await this.openTerminalForTarget(cwd, file ? file.path : null);
+  }
+  /**
+   * Open the terminal rooted at `cwd`, resuming the folder's most recently
+   * updated session within `resumeWithinDays`, otherwise starting a new
+   * session pre-filled with `attachPath` (vault-relative) as an `@path`
+   * mention in the composer.
+   */
+  async openTerminalForTarget(cwd, attachPath) {
+    var _a, _b;
+    const sessions = await this.listFolderSessions(cwd);
+    const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
+    const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
+    if (this.settings.recentTabsCount > 0) {
+      mergeSessionTabs(
+        cwd,
+        sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title }))
+      );
+    }
     if (resumeId) {
       this.sessionState.setOpenSession(resumeId, cwd);
+      this.pendingRouteSessionId = resumeId;
     } else {
       this.sessionState.setNewSession();
       this.sessionCwd = cwd;
-      this.pendingAttachPath = file ? file.path : null;
+      this.pendingAttachPath = attachPath;
     }
     await this.openOrRestartTerminal();
   }
-  async findResumableSession(cwd) {
-    var _a;
+  /**
+   * Open the terminal for a file-explorer context-menu entry: folders open
+   * rooted at the folder, files open rooted at their parent folder with the
+   * file attached as an `@path` mention on a new session.
+   */
+  async openTerminalForFileMenu(file) {
+    if (file instanceof import_obsidian10.TFolder) {
+      await this.openTerminalForTarget(path11.join(this.vaultRoot, file.path), null);
+      return;
+    }
+    await this.openTerminalForTarget(path11.join(this.vaultRoot, path11.dirname(file.path)), file.path);
+  }
+  async listFolderSessions(cwd) {
     try {
       const client = new OpencodeClient(
         this.settings.opencodePath || "opencode",
@@ -25171,17 +25305,10 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       const compatibility = await client.checkCompatibility();
       const sessions = await client.listSessions(compatibility.generation);
       const target = normalizeDirectory(cwd);
-      const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
-      let latest = null;
-      for (const session of sessions) {
-        if (normalizeDirectory(session.directory) !== target) continue;
-        if (session.updated < threshold) continue;
-        if (!latest || session.updated > latest.updated) latest = session;
-      }
-      return (_a = latest == null ? void 0 : latest.id) != null ? _a : null;
+      return sessions.filter((session) => normalizeDirectory(session.directory) === target).sort((a, b) => b.updated - a.updated);
     } catch (error) {
-      console.debug("Unable to resolve a resumable OpenCode session", error);
-      return null;
+      console.debug("Unable to list OpenCode sessions for the folder", error);
+      return [];
     }
   }
   async openOrRestartTerminal() {
