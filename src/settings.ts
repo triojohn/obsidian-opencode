@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: OpencodePluginSettings = {
 	terminalFontSize: 14,
 	terminalFontFamily: "monospace",
 	newSessionArgs: "",
-	shiftEnterNewline: false,
+	shiftEnterNewline: true,
 	resumeWithinDays: 1,
 	recentTabsCount: 5,
 	fileSessionFolder: "70-journal/daily-notes",

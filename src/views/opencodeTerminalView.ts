@@ -520,11 +520,11 @@ export class OpencodeTerminalView extends ItemView {
 			const clickedRow = Math.floor((event.clientY - rect.top) / (rect.height / terminal.rows));
 			event.preventDefault();
 			event.stopImmediatePropagation();
+			terminal.focus();
 			if (event.type === "mouseup") {
 				const targetText = pickerTargetAtRow(terminal.buffer.active, clickedRow);
 				if (!targetText) return;
-				terminal.input(CLEAR_PICKER_QUERY + targetText, true);
-				window.setTimeout(() => terminal.input("\r", true), 300);
+				terminal.input(CLEAR_PICKER_QUERY + targetText + "\r", true);
 			}
 		};
 		termContainer.addEventListener("mousedown", handlePickerMouse, true);
