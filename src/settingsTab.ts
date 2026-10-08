@@ -77,6 +77,11 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				desc: "When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.",
 				control: { type: "slider", key: "recentTabsCount", min: 0, max: 20, step: 1 },
 			},
+			{
+				name: "Per-file session folder",
+				desc: "Vault-relative folder whose files each get their own session titled after the file name. Opening such a file resumes (or creates) the session with that title. Leave empty to disable.",
+				control: { type: "text", key: "fileSessionFolder", placeholder: "70-journal/daily-notes" },
+			},
 		];
 	}
 
@@ -91,6 +96,7 @@ export class OpencodeSettingTab extends PluginSettingTab {
 			case "shiftEnterNewline": return this.plugin.settings.shiftEnterNewline;
 			case "resumeWithinDays": return this.plugin.settings.resumeWithinDays;
 			case "recentTabsCount": return this.plugin.settings.recentTabsCount;
+			case "fileSessionFolder": return this.plugin.settings.fileSessionFolder;
 			default: return undefined;
 		}
 	}
@@ -123,6 +129,9 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				break;
 			case "recentTabsCount":
 				if (typeof value === "number") this.plugin.settings.recentTabsCount = value;
+				break;
+			case "fileSessionFolder":
+				if (typeof value === "string") this.plugin.settings.fileSessionFolder = value.trim();
 				break;
 			default:
 				return;
@@ -254,6 +263,19 @@ export class OpencodeSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.recentTabsCount)
 					.onChange(async (value) => {
 						this.plugin.settings.recentTabsCount = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Per-file session folder")
+			.setDesc("Vault-relative folder whose files each get their own session titled after the file name. Opening such a file resumes (or creates) the session with that title. Leave empty to disable.")
+			.addText((text) =>
+				text
+					.setPlaceholder("70-journal/daily-notes")
+					.setValue(this.plugin.settings.fileSessionFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.fileSessionFolder = value.trim();
 						await this.plugin.saveSettings();
 					})
 			);

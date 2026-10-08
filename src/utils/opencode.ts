@@ -543,6 +543,61 @@ export class OpencodeClient {
 	}
 
 	/**
+	 * Find the most recently updated root session whose title exactly matches
+	 * `title` and whose working directory matches `directory`.
+	 *
+	 * Args:
+	 *     title: Exact session title to match.
+	 *     directory: Absolute working directory the session must belong to.
+	 *
+	 * Returns:
+	 *     The newest matching session, or null when none exists.
+	 */
+	async findSessionByTitle(title: string, directory: string): Promise<OpencodeSession | null> {
+		const run = this.commandRunner();
+		try {
+			const projectId = await this.resolveProjectId(run);
+			const query = "/api/session?parentID=null"
+				+ (projectId ? `&project=${encodeURIComponent(projectId)}` : "")
+				+ `&search=${encodeURIComponent(title)}&limit=50&order=desc`;
+			const page = parseV2SessionPage(await run(["api", "get", query]));
+			const target = normalizeProjectPath(directory);
+			const match = page.sessions
+				.filter((session) => session.title === title && normalizeProjectPath(session.directory) === target)
+				.sort((a, b) => b.updated - a.updated)[0];
+			return match ?? null;
+		} catch (error) {
+			if (error instanceof OpencodeError) throw error;
+			throw new MalformedCliOutputError(error);
+		}
+	}
+
+	/**
+	 * Create a new OpenCode session with an explicit title and working
+	 * directory.
+	 *
+	 * Args:
+	 *     options.title: Session title.
+	 *     options.directory: Absolute working directory for the session.
+	 *
+	 * Returns:
+	 *     The created session.
+	 */
+	async createSession(options: { title: string; directory: string }): Promise<OpencodeSession> {
+		const run = this.commandRunner();
+		try {
+			const body = JSON.stringify({ title: options.title, location: { directory: options.directory } });
+			const raw = await run(["api", "post", "/api/session", "-d", body]);
+			const payload: unknown = JSON.parse(raw);
+			const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+			return parseV2Session(data);
+		} catch (error) {
+			if (error instanceof OpencodeError) throw error;
+			throw new MalformedCliOutputError(error);
+		}
+	}
+
+	/**
 	 * Fetch the most recent messages of a session through the v2 HTTP API.
 	 *
 	 * Args:

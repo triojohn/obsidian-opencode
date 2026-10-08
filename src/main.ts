@@ -344,6 +344,8 @@ export default class OpencodePlugin extends Plugin {
 	 * mention in the composer.
 	 */
 	async openTerminalForTarget(cwd: string, attachPath: string | null): Promise<void> {
+		if (attachPath && await this.openFileSessionIfConfigured(cwd, attachPath)) return;
+
 		const sessions = await this.listFolderSessions(cwd);
 		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
 		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
@@ -380,6 +382,38 @@ export default class OpencodePlugin extends Plugin {
 			return;
 		}
 		await this.openTerminalForTarget(path.join(this.vaultRoot, path.dirname(file.path)), file.path);
+	}
+
+	/**
+	 * When `attachPath` lives in the configured per-file session folder, resume
+	 * or create a session titled after the file name (without extension).
+	 *
+	 * Returns true when this branch handled the request, false to fall back to
+	 * the default resume-or-new logic.
+	 */
+	private async openFileSessionIfConfigured(cwd: string, attachPath: string): Promise<boolean> {
+		const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
+		if (!folder) return false;
+		const posixPath = attachPath.replace(/\\/g, "/");
+		if (path.posix.dirname(posixPath) !== folder) return false;
+		const name = path.posix.basename(posixPath).replace(/\.[^./]+$/, "");
+		try {
+			const client = new OpencodeClient(
+				this.settings.opencodePath || "opencode",
+				cwd,
+				this.settings.environmentVariables,
+			);
+			const found = await client.findSessionByTitle(name, cwd);
+			const session = found ?? await client.createSession({ title: name, directory: cwd });
+			this.sessionState.setOpenSession(session.id, cwd);
+			this.pendingRouteSessionId = session.id;
+			this.pendingAttachPath = found ? null : attachPath;
+			await this.openOrRestartTerminal();
+			return true;
+		} catch (error) {
+			console.debug("Unable to open per-file OpenCode session", error);
+			return false;
+		}
 	}
 
 	private async listFolderSessions(cwd: string): Promise<OpencodeSession[]> {

@@ -20055,7 +20055,8 @@ var DEFAULT_SETTINGS = {
   newSessionArgs: "",
   shiftEnterNewline: false,
   resumeWithinDays: 1,
-  recentTabsCount: 5
+  recentTabsCount: 5,
+  fileSessionFolder: "70-journal/daily-notes"
 };
 
 // src/settingsTab.ts
@@ -20204,6 +20205,11 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         name: "Recent session tabs",
         desc: "When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.",
         control: { type: "slider", key: "recentTabsCount", min: 0, max: 20, step: 1 }
+      },
+      {
+        name: "Per-file session folder",
+        desc: "Vault-relative folder whose files each get their own session titled after the file name. Opening such a file resumes (or creates) the session with that title. Leave empty to disable.",
+        control: { type: "text", key: "fileSessionFolder", placeholder: "70-journal/daily-notes" }
       }
     ];
   }
@@ -20227,6 +20233,8 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         return this.plugin.settings.resumeWithinDays;
       case "recentTabsCount":
         return this.plugin.settings.recentTabsCount;
+      case "fileSessionFolder":
+        return this.plugin.settings.fileSessionFolder;
       default:
         return void 0;
     }
@@ -20259,6 +20267,9 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         break;
       case "recentTabsCount":
         if (typeof value === "number") this.plugin.settings.recentTabsCount = value;
+        break;
+      case "fileSessionFolder":
+        if (typeof value === "string") this.plugin.settings.fileSessionFolder = value.trim();
         break;
       default:
         return;
@@ -20327,6 +20338,12 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Recent session tabs").setDesc("When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.").addSlider(
       (slider) => slider.setLimits(0, 20, 1).setValue(this.plugin.settings.recentTabsCount).onChange(async (value) => {
         this.plugin.settings.recentTabsCount = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Per-file session folder").setDesc("Vault-relative folder whose files each get their own session titled after the file name. Opening such a file resumes (or creates) the session with that title. Leave empty to disable.").addText(
+      (text) => text.setPlaceholder("70-journal/daily-notes").setValue(this.plugin.settings.fileSessionFolder).onChange(async (value) => {
+        this.plugin.settings.fileSessionFolder = value.trim();
         await this.plugin.saveSettings();
       })
     );
@@ -22628,6 +22645,55 @@ ${result.stderr}`;
       const query = `/api/session?project=${encodeURIComponent(projectId)}&parentID=null&limit=${limit}&order=desc` + (options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : "");
       const page = parseV2SessionPage(await run(["api", "get", query]));
       return { sessions: page.sessions, nextCursor: (_b = page.nextCursor) != null ? _b : null };
+    } catch (error) {
+      if (error instanceof OpencodeError) throw error;
+      throw new MalformedCliOutputError(error);
+    }
+  }
+  /**
+   * Find the most recently updated root session whose title exactly matches
+   * `title` and whose working directory matches `directory`.
+   *
+   * Args:
+   *     title: Exact session title to match.
+   *     directory: Absolute working directory the session must belong to.
+   *
+   * Returns:
+   *     The newest matching session, or null when none exists.
+   */
+  async findSessionByTitle(title, directory) {
+    const run = this.commandRunner();
+    try {
+      const projectId = await this.resolveProjectId(run);
+      const query = "/api/session?parentID=null" + (projectId ? `&project=${encodeURIComponent(projectId)}` : "") + `&search=${encodeURIComponent(title)}&limit=50&order=desc`;
+      const page = parseV2SessionPage(await run(["api", "get", query]));
+      const target = normalizeProjectPath(directory);
+      const match = page.sessions.filter((session) => session.title === title && normalizeProjectPath(session.directory) === target).sort((a, b) => b.updated - a.updated)[0];
+      return match != null ? match : null;
+    } catch (error) {
+      if (error instanceof OpencodeError) throw error;
+      throw new MalformedCliOutputError(error);
+    }
+  }
+  /**
+   * Create a new OpenCode session with an explicit title and working
+   * directory.
+   *
+   * Args:
+   *     options.title: Session title.
+   *     options.directory: Absolute working directory for the session.
+   *
+   * Returns:
+   *     The created session.
+   */
+  async createSession(options) {
+    const run = this.commandRunner();
+    try {
+      const body = JSON.stringify({ title: options.title, location: { directory: options.directory } });
+      const raw = await run(["api", "post", "/api/session", "-d", body]);
+      const payload = JSON.parse(raw);
+      const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+      return parseV2Session(data);
     } catch (error) {
       if (error instanceof OpencodeError) throw error;
       throw new MalformedCliOutputError(error);
@@ -25264,6 +25330,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    */
   async openTerminalForTarget(cwd, attachPath) {
     var _a, _b;
+    if (attachPath && await this.openFileSessionIfConfigured(cwd, attachPath)) return;
     const sessions = await this.listFolderSessions(cwd);
     const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
     const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
@@ -25294,6 +25361,37 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       return;
     }
     await this.openTerminalForTarget(path11.join(this.vaultRoot, path11.dirname(file.path)), file.path);
+  }
+  /**
+   * When `attachPath` lives in the configured per-file session folder, resume
+   * or create a session titled after the file name (without extension).
+   *
+   * Returns true when this branch handled the request, false to fall back to
+   * the default resume-or-new logic.
+   */
+  async openFileSessionIfConfigured(cwd, attachPath) {
+    const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
+    if (!folder) return false;
+    const posixPath = attachPath.replace(/\\/g, "/");
+    if (path11.posix.dirname(posixPath) !== folder) return false;
+    const name = path11.posix.basename(posixPath).replace(/\.[^./]+$/, "");
+    try {
+      const client = new OpencodeClient(
+        this.settings.opencodePath || "opencode",
+        cwd,
+        this.settings.environmentVariables
+      );
+      const found = await client.findSessionByTitle(name, cwd);
+      const session = found != null ? found : await client.createSession({ title: name, directory: cwd });
+      this.sessionState.setOpenSession(session.id, cwd);
+      this.pendingRouteSessionId = session.id;
+      this.pendingAttachPath = found ? null : attachPath;
+      await this.openOrRestartTerminal();
+      return true;
+    } catch (error) {
+      console.debug("Unable to open per-file OpenCode session", error);
+      return false;
+    }
   }
   async listFolderSessions(cwd) {
     try {
