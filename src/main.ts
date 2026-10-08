@@ -14,6 +14,7 @@ import { OpencodeClient } from "./utils/opencode";
 import type { OpencodeSession } from "./utils/opencode";
 import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
+import { mergeSessionTabs } from "./utils/sessionTabs";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -67,6 +68,14 @@ export default class OpencodePlugin extends Plugin {
 
 	set sessionCwd(value: string | null) {
 		this.sessionState.sessionCwd = value;
+	}
+
+	get pendingRouteSessionId(): string | null {
+		return this.sessionState.pendingRouteSessionId;
+	}
+
+	set pendingRouteSessionId(value: string | null) {
+		this.sessionState.pendingRouteSessionId = value;
 	}
 
 	async onload() {
@@ -315,9 +324,22 @@ export default class OpencodePlugin extends Plugin {
 			? path.join(this.vaultRoot, path.dirname(file.path))
 			: this.settings.defaultWorkingDirectory || this.vaultRoot;
 
-		const resumeId = await this.findResumableSession(cwd);
+		const sessions = await this.listFolderSessions(cwd);
+		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
+		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
+
+		if (this.settings.recentTabsCount > 0) {
+			mergeSessionTabs(
+				cwd,
+				sessions
+					.slice(0, this.settings.recentTabsCount)
+					.map((session) => ({ id: session.id, title: session.title })),
+			);
+		}
+
 		if (resumeId) {
 			this.sessionState.setOpenSession(resumeId, cwd);
+			this.pendingRouteSessionId = resumeId;
 		} else {
 			this.sessionState.setNewSession();
 			this.sessionCwd = cwd;
@@ -327,7 +349,7 @@ export default class OpencodePlugin extends Plugin {
 		await this.openOrRestartTerminal();
 	}
 
-	private async findResumableSession(cwd: string): Promise<string | null> {
+	private async listFolderSessions(cwd: string): Promise<OpencodeSession[]> {
 		try {
 			const client = new OpencodeClient(
 				this.settings.opencodePath || "opencode",
@@ -337,18 +359,12 @@ export default class OpencodePlugin extends Plugin {
 			const compatibility = await client.checkCompatibility();
 			const sessions = await client.listSessions(compatibility.generation);
 			const target = normalizeDirectory(cwd);
-			const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
-
-			let latest: OpencodeSession | null = null;
-			for (const session of sessions) {
-				if (normalizeDirectory(session.directory) !== target) continue;
-				if (session.updated < threshold) continue;
-				if (!latest || session.updated > latest.updated) latest = session;
-			}
-			return latest?.id ?? null;
+			return sessions
+				.filter((session) => normalizeDirectory(session.directory) === target)
+				.sort((a, b) => b.updated - a.updated);
 		} catch (error) {
-			console.debug("Unable to resolve a resumable OpenCode session", error);
-			return null;
+			console.debug("Unable to list OpenCode sessions for the folder", error);
+			return [];
 		}
 	}
 

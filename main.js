@@ -22331,6 +22331,20 @@ function parseV2SessionPage(raw) {
   });
   return { sessions, nextCursor };
 }
+function parseV2Messages(raw) {
+  const payload = JSON.parse(raw);
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    throw new Error("Expected an OpenCode v2 message response with a data array");
+  }
+  return payload.data.map((value) => {
+    if (!isRecord(value) || typeof value.type !== "string") {
+      throw new Error("Expected an OpenCode v2 message type");
+    }
+    const created = isRecord(value.time) && typeof value.time.created === "number" ? value.time.created : 0;
+    const text = Array.isArray(value.content) ? value.content.filter((part) => isRecord(part) && part.type === "text" && typeof part.text === "string").map((part) => part.text).join(" ") : "";
+    return { role: value.type, created, text };
+  });
+}
 var WINDOWS_EXEC_HOST_JS = String.raw`
 const { spawn } = require("child_process");
 let [cwd, file, ...args] = process.argv.slice(1);
@@ -22597,6 +22611,30 @@ ${result.stderr}`;
       const query = `/api/session?project=${encodeURIComponent(projectId)}&parentID=null&limit=${limit}&order=desc` + (options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : "");
       const page = parseV2SessionPage(await run(["api", "get", query]));
       return { sessions: page.sessions, nextCursor: (_b = page.nextCursor) != null ? _b : null };
+    } catch (error) {
+      if (error instanceof OpencodeError) throw error;
+      throw new MalformedCliOutputError(error);
+    }
+  }
+  /**
+   * Fetch the most recent messages of a session through the v2 HTTP API.
+   *
+   * Args:
+   *     sessionId: OpenCode session id (`ses_…`).
+   *     limit: Maximum number of messages to fetch, newest first.
+   *
+   * Returns:
+   *     Messages in chronological order (oldest first).
+   */
+  async listSessionMessages(sessionId, limit = 50) {
+    if (!SAFE_ID_RE.test(sessionId)) {
+      throw new Error(`Invalid session ID: ${sessionId}`);
+    }
+    const run = this.commandRunner();
+    try {
+      const query = `/api/session/${sessionId}/message?limit=${limit}&order=desc`;
+      const messages = parseV2Messages(await run(["api", "get", query]));
+      return messages.reverse();
     } catch (error) {
       if (error instanceof OpencodeError) throw error;
       throw new MalformedCliOutputError(error);
@@ -23934,26 +23972,36 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     info.createDiv({ text: `Agent: ${data.info.agent || "default"}` });
     info.createDiv({ text: `Tokens: ${((_d = data.info.tokens) == null ? void 0 : _d.input) || 0} in / ${((_e = data.info.tokens) == null ? void 0 : _e.output) || 0} out` });
     info.createDiv({ text: `Cost: $${(data.info.cost || 0).toFixed(4)}` });
-    const messages = this.detailContainer.createDiv({ cls: "opencode-messages" });
-    for (const msg of data.messages) {
-      const msgEl = messages.createDiv({ cls: `opencode-message opencode-message-${msg.info.role}` });
-      const header = msgEl.createDiv({ cls: "opencode-message-header" });
+    try {
+      const messages = await this.createClient().listSessionMessages(session.id);
+      this.renderRecentMessages(messages);
+    } catch (error) {
+      console.error("Failed to load session messages", error);
+      this.renderRecentMessages([]);
+    }
+  }
+  renderRecentMessages(messages) {
+    if (!this.detailContainer) return;
+    const container = this.detailContainer.createDiv({ cls: "opencode-session-messages" });
+    container.createDiv({ cls: "opencode-session-messages-title", text: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F" });
+    const recent = messages.slice(-8);
+    if (recent.length === 0) {
+      container.createDiv({ cls: "opencode-session-messages-empty", text: "\u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439" });
+      return;
+    }
+    for (const msg of recent) {
+      const text = msg.text.replace(/\s+/g, " ").trim();
+      const item = container.createDiv({ cls: "opencode-session-message-item" });
+      const header = item.createDiv({ cls: "opencode-session-message-header" });
       header.createSpan({
-        cls: "opencode-message-role",
-        text: msg.info.role === "assistant" ? "AGENT" : msg.info.role
+        cls: "opencode-session-message-role",
+        text: msg.role === "assistant" ? "AGENT" : msg.role
       });
-      header.createSpan({ cls: "opencode-message-time", text: moment2(msg.info.time.created).format("HH:mm:ss") });
-      const body = msgEl.createDiv({ cls: "opencode-message-body" });
-      for (const part of msg.parts) {
-        if (part.type === "text" && part.text) {
-          const p = body.createDiv({ cls: "opencode-message-text" });
-          p.innerText = part.text;
-        } else if (part.type === "step-start") {
-          body.createDiv({ cls: "opencode-message-step", text: "[thinking...]" });
-        } else if (part.type === "tool-call") {
-          body.createDiv({ cls: "opencode-message-tool", text: `[tool: ${part.name || part.type}]` });
-        }
-      }
+      header.createSpan({ cls: "opencode-session-message-time", text: moment2(msg.created).fromNow() });
+      item.createDiv({
+        cls: "opencode-session-message-text",
+        text: text ? text.length > 200 ? `${text.slice(0, 200)}\u2026` : text : "(no text)"
+      });
     }
   }
   async exportSessionToNote(session) {

@@ -711,8 +711,10 @@ export class OpencodeTerminalView extends ItemView {
 		}
 
 		// Clear one-time session args after reading them
+		const routeSessionId = this.plugin.pendingRouteSessionId;
 		this.plugin.sessionArgs = null;
 		this.plugin.sessionCwd = null;
+		this.plugin.pendingRouteSessionId = null;
 
 		// Handle pending prompt from @opencode editor suggest
 		if (this.plugin.pendingPrompt) {
@@ -726,6 +728,7 @@ export class OpencodeTerminalView extends ItemView {
 			args,
 			environmentVariables: this.plugin.settings.environmentVariables,
 			editorPort: this.editorPort,
+			routeSessionId: routeSessionId ?? undefined,
 		});
 
 		// Pre-fill the active note as an @mention for a freshly opened session.

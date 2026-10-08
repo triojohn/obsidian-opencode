@@ -1,12 +1,12 @@
 import { ItemView, WorkspaceLeaf, Notice, moment as obsidianMoment, Modal, App } from "obsidian";
 import type OpencodePlugin from "../main";
-import { OpencodeClient, OpencodeSession, OpencodeExport, ExportTooLargeError } from "../utils/opencode";
+import { OpencodeClient, OpencodeSession, OpencodeExport, OpencodeSessionMessage, ExportTooLargeError } from "../utils/opencode";
 import { SessionExporter } from "../modules/sessionExporter";
 import { sessionListErrorMessage } from "./conversationErrors";
 import { OpenCodeCliGeneration } from "../utils/opencodeExecutable";
 import { normalizeVaultPath } from "../utils/path";
 
-const moment: (input: number) => { format: (fmt: string) => string } = obsidianMoment;
+const moment: (input: number) => { format: (fmt: string) => string; fromNow: () => string } = obsidianMoment;
 
 const SESSION_PAGE_LIMIT = 20;
 const SESSION_SCROLL_THRESHOLD = 200;
@@ -303,27 +303,37 @@ export class OpencodeConversationView extends ItemView {
 		info.createDiv({ text: `Tokens: ${data.info.tokens?.input || 0} in / ${data.info.tokens?.output || 0} out` });
 		info.createDiv({ text: `Cost: $${(data.info.cost || 0).toFixed(4)}` });
 
-		const messages = this.detailContainer.createDiv({ cls: "opencode-messages" });
-		for (const msg of data.messages) {
-			const msgEl = messages.createDiv({ cls: `opencode-message opencode-message-${msg.info.role}` });
-			const header = msgEl.createDiv({ cls: "opencode-message-header" });
-			header.createSpan({
-				cls: "opencode-message-role",
-				text: msg.info.role === "assistant" ? "AGENT" : msg.info.role,
-			});
-			header.createSpan({ cls: "opencode-message-time", text: moment(msg.info.time.created).format("HH:mm:ss") });
+		try {
+			const messages = await this.createClient().listSessionMessages(session.id);
+			this.renderRecentMessages(messages);
+		} catch (error) {
+			console.error("Failed to load session messages", error);
+			this.renderRecentMessages([]);
+		}
+	}
 
-			const body = msgEl.createDiv({ cls: "opencode-message-body" });
-			for (const part of msg.parts) {
-				if (part.type === "text" && part.text) {
-					const p = body.createDiv({ cls: "opencode-message-text" });
-					p.innerText = part.text;
-				} else if (part.type === "step-start") {
-					body.createDiv({ cls: "opencode-message-step", text: "[thinking...]" });
-				} else if (part.type === "tool-call") {
-					body.createDiv({ cls: "opencode-message-tool", text: `[tool: ${part.name || part.type}]` });
-				}
-			}
+	private renderRecentMessages(messages: OpencodeSessionMessage[]): void {
+		if (!this.detailContainer) return;
+		const container = this.detailContainer.createDiv({ cls: "opencode-session-messages" });
+		container.createDiv({ cls: "opencode-session-messages-title", text: "Последние сообщения" });
+		const recent = messages.slice(-8);
+		if (recent.length === 0) {
+			container.createDiv({ cls: "opencode-session-messages-empty", text: "нет сообщений" });
+			return;
+		}
+		for (const msg of recent) {
+			const text = msg.text.replace(/\s+/g, " ").trim();
+			const item = container.createDiv({ cls: "opencode-session-message-item" });
+			const header = item.createDiv({ cls: "opencode-session-message-header" });
+			header.createSpan({
+				cls: "opencode-session-message-role",
+				text: msg.role === "assistant" ? "AGENT" : msg.role,
+			});
+			header.createSpan({ cls: "opencode-session-message-time", text: moment(msg.created).fromNow() });
+			item.createDiv({
+				cls: "opencode-session-message-text",
+				text: text ? (text.length > 200 ? `${text.slice(0, 200)}…` : text) : "(no text)",
+			});
 		}
 	}
 

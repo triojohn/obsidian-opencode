@@ -531,6 +531,48 @@
 	margin-bottom: 2px;
 }
 
+.opencode-session-messages {
+	margin-bottom: 12px;
+}
+
+.opencode-session-messages-title {
+	font-size: 0.8em;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+
+.opencode-session-messages-empty {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	font-style: italic;
+}
+
+.opencode-session-message-item {
+	border-left: 3px solid var(--background-modifier-border);
+	padding: 4px 8px;
+	margin-bottom: 6px;
+	background: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.opencode-session-message-header {
+	display: flex;
+	justify-content: space-between;
+	font-size: 0.7em;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--text-muted);
+	margin-bottom: 2px;
+}
+
+.opencode-session-message-text {
+	font-size: 0.85em;
+	line-height: 1.4;
+	word-break: break-word;
+}
+
 .opencode-messages {
 	display: flex;
 	flex-direction: column;

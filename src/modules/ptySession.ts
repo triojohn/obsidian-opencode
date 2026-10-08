@@ -227,6 +227,8 @@ export interface PtySessionOptions {
 	args: string[];
 	environmentVariables?: EnvironmentVariables;
 	editorPort?: number;
+	/** Session to open directly on start via OPENCODE_ROUTE (skips the home tick). */
+	routeSessionId?: string;
 }
 
 function unixTerminalSize(terminal: Terminal): string {
@@ -329,6 +331,9 @@ export class PtySession {
 		env.TERM = "xterm-256color";
 		if (options.editorPort) {
 			env.OPENCODE_EDITOR_SSE_PORT = String(options.editorPort);
+		}
+		if (options.routeSessionId) {
+			env.OPENCODE_ROUTE = JSON.stringify({ type: "session", sessionID: options.routeSessionId });
 		}
 		// pty.fork() starts at 0x0, which the TUI cannot use. Apply both
 		// the cell grid and DOM pixel dimensions before the app starts so

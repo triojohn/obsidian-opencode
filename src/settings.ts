@@ -9,6 +9,7 @@ export interface OpencodePluginSettings {
 	newSessionArgs: string;
 	shiftEnterNewline: boolean;
 	resumeWithinDays: number;
+	recentTabsCount: number;
 }
 
 export const DEFAULT_SETTINGS: OpencodePluginSettings = {
@@ -20,4 +21,5 @@ export const DEFAULT_SETTINGS: OpencodePluginSettings = {
 	newSessionArgs: "",
 	shiftEnterNewline: false,
 	resumeWithinDays: 1,
+	recentTabsCount: 5,
 };

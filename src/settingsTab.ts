@@ -72,6 +72,11 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				desc: "When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.",
 				control: { type: "slider", key: "resumeWithinDays", min: 0, max: 30, step: 1 },
 			},
+			{
+				name: "Recent session tabs",
+				desc: "When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.",
+				control: { type: "slider", key: "recentTabsCount", min: 0, max: 20, step: 1 },
+			},
 		];
 	}
 
@@ -85,6 +90,7 @@ export class OpencodeSettingTab extends PluginSettingTab {
 			case "newSessionArgs": return this.plugin.settings.newSessionArgs;
 			case "shiftEnterNewline": return this.plugin.settings.shiftEnterNewline;
 			case "resumeWithinDays": return this.plugin.settings.resumeWithinDays;
+			case "recentTabsCount": return this.plugin.settings.recentTabsCount;
 			default: return undefined;
 		}
 	}
@@ -114,6 +120,9 @@ export class OpencodeSettingTab extends PluginSettingTab {
 				break;
 			case "resumeWithinDays":
 				if (typeof value === "number") this.plugin.settings.resumeWithinDays = value;
+				break;
+			case "recentTabsCount":
+				if (typeof value === "number") this.plugin.settings.recentTabsCount = value;
 				break;
 			default:
 				return;
@@ -232,6 +241,19 @@ export class OpencodeSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.resumeWithinDays)
 					.onChange(async (value) => {
 						this.plugin.settings.resumeWithinDays = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Recent session tabs")
+			.setDesc("When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.")
+			.addSlider((slider) =>
+				slider
+					.setLimits(0, 20, 1)
+					.setValue(this.plugin.settings.recentTabsCount)
+					.onChange(async (value) => {
+						this.plugin.settings.recentTabsCount = value;
 						await this.plugin.saveSettings();
 					})
 			);

@@ -74,6 +74,13 @@ export interface OpencodeExport {
 	messages: OpencodeMessage[];
 }
 
+/** One session message normalized from the OpenCode v2 HTTP API. */
+export interface OpencodeSessionMessage {
+	role: string;
+	created: number;
+	text: string;
+}
+
 export interface OpencodeActiveSession {
 	id: string;
 	directory: string;
@@ -166,6 +173,35 @@ function parseV2SessionPage(raw: string): { sessions: OpencodeSession[]; nextCur
 		return parentID === undefined || parentID === null ? [session] : [];
 	});
 	return { sessions, nextCursor };
+}
+
+/**
+ * Parse an OpenCode v2 `GET /api/session/<id>/message` payload.
+ *
+ * Each message carries a `type` role, a `time.created` timestamp and a
+ * `content` array of parts; only text parts are joined into `text`.
+ */
+function parseV2Messages(raw: string): OpencodeSessionMessage[] {
+	const payload: unknown = JSON.parse(raw);
+	if (!isRecord(payload) || !Array.isArray(payload.data)) {
+		throw new Error("Expected an OpenCode v2 message response with a data array");
+	}
+	return payload.data.map((value) => {
+		if (!isRecord(value) || typeof value.type !== "string") {
+			throw new Error("Expected an OpenCode v2 message type");
+		}
+		const created = isRecord(value.time) && typeof value.time.created === "number"
+			? value.time.created
+			: 0;
+		const text = Array.isArray(value.content)
+			? value.content
+				.filter((part): part is Record<string, unknown> =>
+					isRecord(part) && part.type === "text" && typeof part.text === "string")
+				.map((part) => part.text as string)
+				.join(" ")
+			: "";
+		return { role: value.type, created, text };
+	});
 }
 
 interface ExecResult {
@@ -500,6 +536,31 @@ export class OpencodeClient {
 				+ (options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : "");
 			const page = parseV2SessionPage(await run(["api", "get", query]));
 			return { sessions: page.sessions, nextCursor: page.nextCursor ?? null };
+		} catch (error) {
+			if (error instanceof OpencodeError) throw error;
+			throw new MalformedCliOutputError(error);
+		}
+	}
+
+	/**
+	 * Fetch the most recent messages of a session through the v2 HTTP API.
+	 *
+	 * Args:
+	 *     sessionId: OpenCode session id (`ses_…`).
+	 *     limit: Maximum number of messages to fetch, newest first.
+	 *
+	 * Returns:
+	 *     Messages in chronological order (oldest first).
+	 */
+	async listSessionMessages(sessionId: string, limit = 50): Promise<OpencodeSessionMessage[]> {
+		if (!SAFE_ID_RE.test(sessionId)) {
+			throw new Error(`Invalid session ID: ${sessionId}`);
+		}
+		const run = this.commandRunner();
+		try {
+			const query = `/api/session/${sessionId}/message?limit=${limit}&order=desc`;
+			const messages = parseV2Messages(await run(["api", "get", query]));
+			return messages.reverse();
 		} catch (error) {
 			if (error instanceof OpencodeError) throw error;
 			throw new MalformedCliOutputError(error);
