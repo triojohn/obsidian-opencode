@@ -350,14 +350,12 @@ export default class OpencodePlugin extends Plugin {
 		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
 		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
 
-		if (this.settings.recentTabsCount > 0) {
-			mergeSessionTabs(
-				cwd,
-				sessions
-					.slice(0, this.settings.recentTabsCount)
-					.map((session) => ({ id: session.id, title: session.title })),
-			);
-		}
+		const recentTabs = this.settings.recentTabsCount > 0
+			? sessions
+				.slice(0, this.settings.recentTabsCount)
+				.map((session) => ({ id: session.id, title: session.title }))
+			: null;
+		if (recentTabs) mergeSessionTabs(cwd, recentTabs);
 
 		if (resumeId) {
 			this.sessionState.setOpenSession(resumeId, cwd);
@@ -369,6 +367,17 @@ export default class OpencodePlugin extends Plugin {
 		}
 
 		await this.openOrRestartTerminal();
+
+		if (recentTabs) {
+			// The first write can lose a Windows rename race with the TUI's own
+			// flush; re-merge once the terminal is up so live-reload picks the
+			// tabs up. Skipped if the plugin unloaded or the terminal is gone.
+			this.registerInterval(window.setTimeout(() => {
+				if (this.unloading) return;
+				if (this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE).length === 0) return;
+				mergeSessionTabs(cwd, recentTabs);
+			}, 1_500));
+		}
 	}
 
 	/**

@@ -100,8 +100,39 @@ export function mergeSessionTabs(cwd: string, sessions: SessionTabEntry[]): void
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const temp = `${file}.${process.pid}.tmp`;
 		fs.writeFileSync(temp, JSON.stringify(parsed, null, 2));
-		fs.renameSync(temp, file);
+		renameWithRetry(temp, file);
 	} catch (error) {
 		console.debug("Unable to merge OpenCode session tabs", error);
+	}
+}
+
+/**
+ * Overwrite `file` with `temp`, retrying a few times on transient Windows
+ * rename errors (EBUSY/EPERM).
+ *
+ * The OpenCode TUI may briefly hold `file` open while flushing its own tab
+ * state; a short backoff lets this write win the race instead of dropping the
+ * merge silently. Logs with the full path on final failure.
+ */
+function renameWithRetry(temp: string, file: string, attempts = 4): void {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			fs.renameSync(temp, file);
+			return;
+		} catch (error) {
+			if (attempt >= attempts) {
+				console.warn(`Unable to write OpenCode session tabs to ${file}`, error);
+				return;
+			}
+			sleepSync(attempt * 20);
+		}
+	}
+}
+
+// ponytail: busy-wait; retries are bounded (3×20-60 ms) so blocking the renderer is acceptable.
+function sleepSync(ms: number): void {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		// spin until the backoff window elapses
 	}
 }

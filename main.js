@@ -25127,9 +25127,28 @@ function mergeSessionTabs(cwd, sessions) {
     fs7.mkdirSync(path10.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
     fs7.writeFileSync(temp, JSON.stringify(parsed, null, 2));
-    fs7.renameSync(temp, file);
+    renameWithRetry(temp, file);
   } catch (error) {
     console.debug("Unable to merge OpenCode session tabs", error);
+  }
+}
+function renameWithRetry(temp, file, attempts = 4) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs7.renameSync(temp, file);
+      return;
+    } catch (error) {
+      if (attempt >= attempts) {
+        console.warn(`Unable to write OpenCode session tabs to ${file}`, error);
+        return;
+      }
+      sleepSync(attempt * 20);
+    }
+  }
+}
+function sleepSync(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
   }
 }
 
@@ -25428,12 +25447,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const sessions = await this.listFolderSessions(cwd);
     const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
     const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
-    if (this.settings.recentTabsCount > 0) {
-      mergeSessionTabs(
-        cwd,
-        sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title }))
-      );
-    }
+    const recentTabs = this.settings.recentTabsCount > 0 ? sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title })) : null;
+    if (recentTabs) mergeSessionTabs(cwd, recentTabs);
     if (resumeId) {
       this.sessionState.setOpenSession(resumeId, cwd);
       this.pendingRouteSessionId = resumeId;
@@ -25443,6 +25458,13 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       this.pendingAttachPath = attachPath;
     }
     await this.openOrRestartTerminal();
+    if (recentTabs) {
+      this.registerInterval(window.setTimeout(() => {
+        if (this.unloading) return;
+        if (this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE).length === 0) return;
+        mergeSessionTabs(cwd, recentTabs);
+      }, 1500));
+    }
   }
   /**
    * Open the terminal for a file-explorer context-menu entry: folders open
