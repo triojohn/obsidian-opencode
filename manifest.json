@@ -1,6 +1,6 @@
 {
 	"id": "obsidian-opencode",
-	"name": "OpenCode",
+	"name": "OpenCode Vault",
 	"version": "1.0.0",
 	"minAppVersion": "1.7.2",
 	"description": "Launch OpenCode CLI terminal sessions and browse conversation history without leaving your vault.",
