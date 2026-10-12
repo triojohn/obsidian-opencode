@@ -23061,7 +23061,7 @@ function terminalColorQueryResponse(osc, color) {
 
 // src/views/opencodeTerminalView.ts
 var OPENCODE_TERMINAL_VIEW_TYPE = "opencode-terminal";
-var SHIFT_ENTER_NEWLINE_SEQUENCE = "\x1B[13;2u";
+var SHIFT_ENTER_NEWLINE_SEQUENCE = "\n";
 var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
     super(leaf);

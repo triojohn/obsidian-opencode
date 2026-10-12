@@ -43,7 +43,8 @@ interface VaultWithConfig {
 }
 
 export const OPENCODE_TERMINAL_VIEW_TYPE = "opencode-terminal";
-const SHIFT_ENTER_NEWLINE_SEQUENCE = "\x1b[13;2u";
+// LF works as a newline in the opencode TUI (same as Ctrl+J); kitty CSI-u is not decoded in this pipeline (xterm.js + ConPTY).
+const SHIFT_ENTER_NEWLINE_SEQUENCE = "\n";
 
 export class OpencodeTerminalView extends ItemView {
 	terminal: Terminal | null = null;
