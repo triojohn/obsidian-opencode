@@ -31,7 +31,7 @@
 ## Источник
 - Реальный путь репозитория: `C:\GitHub\obsidian-opencode`
 - Этот файл: `C:\GitHub\obsidian-opencode\PROJECT.md`
-- Зеркало в vault: `10-projects/obsidian-opencode/PROJECT.md` (односторонняя копия git -> vault, плагин Synaptic Bridge)
+- Зеркало в vault: `30-resources/obsidian-plugins/obsidian-opencode/PROJECT.md` (односторонняя копия git -> vault, плагин Synaptic Bridge)
 - Редактировать только в репозитории. Правка зеркала в vault будет перезаписана.
 
 ## Файл табов TUI
