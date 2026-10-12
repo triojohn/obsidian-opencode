@@ -359,6 +359,10 @@ export class OpencodeTerminalView extends ItemView {
 			})
 		);
 
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", () => this.focusTerminal())
+		);
+
 		// Handle window resize
 		window.addEventListener("resize", doFit);
 		this.register(() => window.removeEventListener("resize", doFit));
@@ -491,7 +495,7 @@ export class OpencodeTerminalView extends ItemView {
 		});
 
 		const isMouseClickableTui = (): boolean => {
-			return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active);
+			return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active, terminal.rows);
 		};
 		const moveCursorOnMouseDown = (event: MouseEvent) => {
 			if (process.platform !== "win32" || event.button !== 0 || isMouseClickableTui()) return;

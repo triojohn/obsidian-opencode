@@ -22255,9 +22255,10 @@ function scrollbarDragInput(previousRow, currentRow, trackRows = 1, thumbRows = 
   if (currentRow > previousRow) return SCROLL_LINE_DOWN.repeat(lineCount);
   return null;
 }
-function isOpenCodePicker(buffer) {
+function isOpenCodePicker(buffer, visibleRows) {
   var _a, _b;
-  for (let index = 0; index < buffer.length; index++) {
+  const end = Math.min(buffer.length, buffer.viewportY + visibleRows);
+  for (let index = buffer.viewportY; index < end; index++) {
     const line = (_b = (_a = buffer.getLine(index)) == null ? void 0 : _a.translateToString(true).trim()) != null ? _b : "";
     if ((line.startsWith("Sessions") || line.startsWith("Select ")) && line.includes("esc")) return true;
   }
@@ -23331,6 +23332,9 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
         doFit();
       })
     );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => this.focusTerminal())
+    );
     window.addEventListener("resize", doFit);
     this.register(() => window.removeEventListener("resize", doFit));
     const themePreviewInput = new ThemePreviewInputBatcher((data) => this.ptySession.writeStdin(data), termContainer.win);
@@ -23461,7 +23465,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
       ownerDocument.removeEventListener("mouseup", stopScrollbarDrag, true);
     });
     const isMouseClickableTui = () => {
-      return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active);
+      return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active, terminal.rows);
     };
     const moveCursorOnMouseDown = (event) => {
       var _a2;

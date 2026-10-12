@@ -84,8 +84,9 @@ export function scrollbarDragInput(
 	return null;
 }
 
-export function isOpenCodePicker(buffer: TerminalBuffer): boolean {
-	for (let index = 0; index < buffer.length; index++) {
+export function isOpenCodePicker(buffer: TerminalBuffer, visibleRows: number): boolean {
+	const end = Math.min(buffer.length, buffer.viewportY + visibleRows);
+	for (let index = buffer.viewportY; index < end; index++) {
 		const line = buffer.getLine(index)?.translateToString(true).trim() ?? "";
 		if ((line.startsWith("Sessions") || line.startsWith("Select ")) && line.includes("esc")) return true;
 	}

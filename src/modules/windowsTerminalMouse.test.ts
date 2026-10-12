@@ -22,9 +22,31 @@ function buffer(lines: string[], viewportY = 0) {
 
 describe("Windows terminal mouse adapter", () => {
 	it("recognizes OpenCode session and selection pickers", () => {
-		expect(isOpenCodePicker(buffer(["Sessions                         esc"]))).toBe(true);
-		expect(isOpenCodePicker(buffer(["Select model                     esc"]))).toBe(true);
-		expect(isOpenCodePicker(buffer(["ordinary terminal output"]))).toBe(false);
+		expect(isOpenCodePicker(buffer(["Sessions                         esc"]), 1)).toBe(true);
+		expect(isOpenCodePicker(buffer(["Select model                     esc"]), 1)).toBe(true);
+		expect(isOpenCodePicker(buffer(["ordinary terminal output"]), 1)).toBe(false);
+	});
+
+	it("ignores a picker line that scrolled above the viewport", () => {
+		const scrollback = buffer([
+			"Sessions                         esc",
+			"ordinary terminal output",
+			"ordinary terminal output",
+			"ordinary terminal output",
+			"ordinary terminal output",
+		], 2);
+
+		expect(isOpenCodePicker(scrollback, 3)).toBe(false);
+
+		const visible = buffer([
+			"ordinary terminal output",
+			"ordinary terminal output",
+			"Sessions                         esc",
+			"ordinary terminal output",
+			"ordinary terminal output",
+		], 2);
+
+		expect(isOpenCodePicker(visible, 3)).toBe(true);
 	});
 
 	it("extracts a searchable picker label from a visible row", () => {
