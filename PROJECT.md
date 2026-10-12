@@ -11,10 +11,10 @@
 ## Раскладка
 - Код: `C:\GitHub\obsidian-opencode` (этот репозиторий), рабочая ветка `vault`.
 - Волт: только карточка проекта; исходников в волте нет.
-- Собранный `main.js` ставится в `<vault>\.obsidian\plugins\opencode\`.
+- Собранный `main.js` ставится в `<vault>\.obsidian\plugins\obsidian-opencode\`.
 
 ## Upstream
-- MIT, ветка `main`, версия 2.3.1, исходники в `src/` (TypeScript), сборка esbuild (`npm run build`, `npm run dev`), требуется Node >= 22.12.
+- MIT, ветка `main`, версия upstream 2.3.1 (собственный `manifest.json` форка — `1.0.0`), исходники в `src/` (TypeScript), сборка esbuild (`npm run build`, `npm run dev`), требуется Node >= 22.12.
 
 ## Факты opencode
 - cwd — один на сессию (`opencode run --dir`).
@@ -66,8 +66,8 @@
 
 ### Сборка и установка
 - Требуется Node ≥22.12 (на рабочей машине — портативный `C:\Tools\node22`, v22.23.3).
-- `npm ci` → `npm run build` → скопировать `main.js` и `styles.css` в `<vault>\.obsidian\plugins\opencode\`.
+- `npm ci` → `npm run build` → скопировать `main.js` и `styles.css` в `<vault>\.obsidian\plugins\obsidian-opencode\`.
 
 ## Смена идентификатора плагина (own id)
 
-- 2026-10-12: плагин отделён от community-плагина `opencode`. `manifest.json`: `id` = `obsidian-opencode`, `name` = `OpenCode`, `author` = `triojohn`, добавлен `authorUrl`, версия = `1.0.0`; `versions.json` дополнен записью `1.0.0` -> `1.7.2`. Установочная папка в vault переименована `.obsidian/plugins/opencode` -> `.obsidian/plugins/obsidian-opencode` (settings `data.json` сохранены 1:1), `community-plugins.json` обновлён. Логика плагина id не хардкодит — использует `this.manifest.id`.
+- 2026-10-12: плагин отделён от community-плагина `opencode`. `manifest.json`: `id` = `obsidian-opencode`, `name` = `OpenCode Vault`, `author` = `triojohn`, добавлен `authorUrl`, версия = `1.0.0`; `versions.json` дополнен записью `1.0.0` -> `1.7.2`. Установочная папка в vault переименована `.obsidian/plugins/opencode` -> `.obsidian/plugins/obsidian-opencode` (settings `data.json` сохранены 1:1), `community-plugins.json` обновлён. Логика плагина id не хардкодит — использует `this.manifest.id`.
