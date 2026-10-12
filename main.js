@@ -23335,6 +23335,17 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => this.focusTerminal())
     );
+    const modalDocument = this.containerEl.ownerDocument;
+    let hadModal = !!modalDocument.querySelector(".modal-container");
+    const modalObserver = new MutationObserver(() => {
+      const hasModal = !!modalDocument.querySelector(".modal-container");
+      if (hadModal && !hasModal) {
+        window.setTimeout(() => this.focusTerminal(), 0);
+      }
+      hadModal = hasModal;
+    });
+    modalObserver.observe(modalDocument.body, { childList: true });
+    this.register(() => modalObserver.disconnect());
     window.addEventListener("resize", doFit);
     this.register(() => window.removeEventListener("resize", doFit));
     const themePreviewInput = new ThemePreviewInputBatcher((data) => this.ptySession.writeStdin(data), termContainer.win);
@@ -23469,6 +23480,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     };
     const moveCursorOnMouseDown = (event) => {
       var _a2;
+      terminal.focus();
       if (process.platform !== "win32" || event.button !== 0 || isMouseClickableTui()) return;
       const screen2 = (_a2 = terminal.element) == null ? void 0 : _a2.querySelector(".xterm-screen");
       if (!screen2) return;

@@ -363,6 +363,22 @@ export class OpencodeTerminalView extends ItemView {
 			this.app.workspace.on("active-leaf-change", () => this.focusTerminal())
 		);
 
+		// Obsidian fires no event when a modal (e.g. Settings) closes, and
+		// active-leaf-change does not fire either. Watch the body for the modal
+		// container disappearing and reclaim focus only on the true->false edge,
+		// so ordinary UI clicks keep their own focus target.
+		const modalDocument = this.containerEl.ownerDocument;
+		let hadModal = !!modalDocument.querySelector(".modal-container");
+		const modalObserver = new MutationObserver(() => {
+			const hasModal = !!modalDocument.querySelector(".modal-container");
+			if (hadModal && !hasModal) {
+				window.setTimeout(() => this.focusTerminal(), 0);
+			}
+			hadModal = hasModal;
+		});
+		modalObserver.observe(modalDocument.body, { childList: true });
+		this.register(() => modalObserver.disconnect());
+
 		// Handle window resize
 		window.addEventListener("resize", doFit);
 		this.register(() => window.removeEventListener("resize", doFit));
@@ -498,6 +514,7 @@ export class OpencodeTerminalView extends ItemView {
 			return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active, terminal.rows);
 		};
 		const moveCursorOnMouseDown = (event: MouseEvent) => {
+			terminal.focus();
 			if (process.platform !== "win32" || event.button !== 0 || isMouseClickableTui()) return;
 			const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
 			if (!screen) return;
