@@ -23721,11 +23721,11 @@ ${message}\r
     });
     const attachPath = this.plugin.pendingAttachPath;
     this.plugin.pendingAttachPath = null;
-    if (attachPath && this.ptySession.getStdin()) {
-      window.setTimeout(() => {
+    if (attachPath) {
+      this.ptySession.onFirstOutput(() => {
         if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
         terminal.input(`@${attachPath}`, true);
-      }, 1500);
+      });
     }
   }
   async onClose() {
@@ -24756,6 +24756,9 @@ var PtySession = class {
     this.windowsInterruptPending = false;
     this.windowsInterruptResetTimer = null;
     this.windowsGracefulExitRequested = false;
+    /** True once the child PTY has produced its first output. */
+    this.ready = false;
+    this.readyCallbacks = [];
   }
   /**
    * Resolves the vendored node-pty entry point inside this plugin.
@@ -24788,6 +24791,8 @@ var PtySession = class {
   spawn(terminal, options) {
     var _a, _b, _c, _d, _e, _f, _g;
     this.windowsGracefulExitRequested = false;
+    this.ready = false;
+    this.readyCallbacks = [];
     if (process.platform === "win32") {
       const windowsBuild = Number(os6.release().split(".")[2]);
       if (Number.isFinite(windowsBuild) && windowsBuild > 0 && windowsBuild < 17763) {
@@ -24921,6 +24926,7 @@ Unable to start the OpenCode Windows PTY: ${message}\r
     }
     this.ptyProcess = ptyProcess;
     (_f = ptyProcess.stdout) == null ? void 0 : _f.on("data", (chunk) => {
+      if (this.ptyProcess === ptyProcess) this.markReady();
       const str = chunk.toString();
       if (str.includes("org.freedesktop.DBus.Error.ServiceUnknown")) {
         new import_obsidian9.Notice(`Additional sandbox permissions are required. Run '${FLATPAK_OVERRIDE_COMMAND}' on your host system to allow command execution.`, 15e3);
@@ -25025,6 +25031,31 @@ Error: ${err.message}\r
   getStdin() {
     var _a, _b;
     return (_b = (_a = this.ptyProcess) == null ? void 0 : _a.stdin) != null ? _b : null;
+  }
+  /**
+   * Runs `callback` once the child has produced its first output, i.e. the
+   * moment input written to the PTY stops being buffered by the host.
+   *
+   * A fixed delay cannot be used for this: under ConPTY the child needs
+   * several seconds to start, so any timer either fires too early (input
+   * dropped) or slows every open down.
+   *
+   * Args:
+   *   callback: Invoked once, immediately if the child already produced output.
+   */
+  onFirstOutput(callback) {
+    if (this.ready) {
+      callback();
+      return;
+    }
+    this.readyCallbacks.push(callback);
+  }
+  markReady() {
+    if (this.ready) return;
+    this.ready = true;
+    const callbacks = this.readyCallbacks;
+    this.readyCallbacks = [];
+    for (const callback of callbacks) callback();
   }
   writeStdin(data) {
     var _a;
@@ -25281,6 +25312,14 @@ function sleepSync(ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
   }
+}
+
+// src/modules/terminalOpenPlan.ts
+function planTerminalOpen(attachPath, resumeSessionId) {
+  return {
+    kind: resumeSessionId ? "resume" : "new",
+    attachPath: attachPath ? attachPath : null
+  };
 }
 
 // src/main.ts
@@ -25593,8 +25632,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    * Open the terminal rooted at the active note's folder.
    *
    * Resumes the folder's most recently updated session when it falls within
-   * `resumeWithinDays`, otherwise starts a new session and pre-fills the
-   * active note as an `@path` mention in the composer.
+   * `resumeWithinDays`, otherwise starts a new session. Either way the active
+   * note is pre-filled as an `@path` mention in the composer.
    */
   async openActiveNoteTerminal() {
     var _a;
@@ -25605,8 +25644,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   /**
    * Open the terminal rooted at `cwd`, resuming the folder's most recently
    * updated session within `resumeWithinDays`, otherwise starting a new
-   * session pre-filled with `attachPath` (vault-relative) as an `@path`
-   * mention in the composer.
+   * session. Either way `attachPath` (vault-relative) is pre-filled as an
+   * `@path` mention in the composer.
    */
   async openTerminalForTarget(cwd, attachPath) {
     var _a, _b;
@@ -25616,14 +25655,15 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
     const recentTabs = this.settings.recentTabsCount > 0 ? sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title })) : null;
     if (recentTabs) mergeSessionTabs(cwd, recentTabs);
-    if (resumeId) {
+    const plan = planTerminalOpen(attachPath, resumeId);
+    if (plan.kind === "resume" && resumeId) {
       this.sessionState.setOpenSession(resumeId, cwd);
       this.pendingRouteSessionId = resumeId;
     } else {
       this.sessionState.setNewSession();
       this.sessionCwd = cwd;
-      this.pendingAttachPath = attachPath;
     }
+    this.pendingAttachPath = plan.attachPath;
     await this.openOrRestartTerminal();
     if (recentTabs) {
       this.registerInterval(window.setTimeout(() => {
@@ -25666,9 +25706,10 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       );
       const found = await client.findSessionByTitle(name, cwd);
       const session = found != null ? found : await client.createSession({ title: name, directory: cwd });
+      const plan = planTerminalOpen(attachPath, session.id);
       this.sessionState.setOpenSession(session.id, cwd);
       this.pendingRouteSessionId = session.id;
-      this.pendingAttachPath = found ? null : attachPath;
+      this.pendingAttachPath = plan.attachPath;
       await this.openOrRestartTerminal();
       return true;
     } catch (error) {

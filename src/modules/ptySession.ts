@@ -349,6 +349,9 @@ export class PtySession {
 	private windowsInterruptPending = false;
 	private windowsInterruptResetTimer: number | null = null;
 	private windowsGracefulExitRequested = false;
+	/** True once the child PTY has produced its first output. */
+	private ready = false;
+	private readyCallbacks: Array<() => void> = [];
 
 	/** Plugin directory; used to locate the vendored node-pty with bundled ConPTY. */
 	constructor(private readonly pluginDirectory?: string) {}
@@ -384,6 +387,8 @@ export class PtySession {
 
 	spawn(terminal: Terminal, options: PtySessionOptions): void {
 		this.windowsGracefulExitRequested = false;
+		this.ready = false;
+		this.readyCallbacks = [];
 		if (process.platform === "win32") {
 			const windowsBuild = Number(os.release().split(".")[2]);
 			if (Number.isFinite(windowsBuild) && windowsBuild > 0 && windowsBuild < 17763) {
@@ -526,6 +531,7 @@ export class PtySession {
 		this.ptyProcess = ptyProcess;
 
 		ptyProcess.stdout?.on("data", (chunk: Buffer) => {
+			if (this.ptyProcess === ptyProcess) this.markReady();
 			const str = chunk.toString();
 			if (str.includes("org.freedesktop.DBus.Error.ServiceUnknown")) {
 				new Notice(`Additional sandbox permissions are required. Run '${FLATPAK_OVERRIDE_COMMAND}' on your host system to allow command execution.`, 15000);
@@ -636,6 +642,33 @@ export class PtySession {
 
 	getStdin(): import("stream").Writable | null {
 		return this.ptyProcess?.stdin ?? null;
+	}
+
+	/**
+	 * Runs `callback` once the child has produced its first output, i.e. the
+	 * moment input written to the PTY stops being buffered by the host.
+	 *
+	 * A fixed delay cannot be used for this: under ConPTY the child needs
+	 * several seconds to start, so any timer either fires too early (input
+	 * dropped) or slows every open down.
+	 *
+	 * Args:
+	 *   callback: Invoked once, immediately if the child already produced output.
+	 */
+	onFirstOutput(callback: () => void): void {
+		if (this.ready) {
+			callback();
+			return;
+		}
+		this.readyCallbacks.push(callback);
+	}
+
+	private markReady(): void {
+		if (this.ready) return;
+		this.ready = true;
+		const callbacks = this.readyCallbacks;
+		this.readyCallbacks = [];
+		for (const callback of callbacks) callback();
 	}
 
 	writeStdin(data: string): void {

@@ -17,6 +17,7 @@ import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
 import { mergeSessionTabs } from "./utils/sessionTabs";
 import { resolvePluginDirectory } from "./utils/path";
+import { planTerminalOpen } from "./modules/terminalOpenPlan";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -365,8 +366,8 @@ export default class OpencodePlugin extends Plugin {
 	 * Open the terminal rooted at the active note's folder.
 	 *
 	 * Resumes the folder's most recently updated session when it falls within
-	 * `resumeWithinDays`, otherwise starts a new session and pre-fills the
-	 * active note as an `@path` mention in the composer.
+	 * `resumeWithinDays`, otherwise starts a new session. Either way the active
+	 * note is pre-filled as an `@path` mention in the composer.
 	 */
 	async openActiveNoteTerminal(): Promise<void> {
 		const file = this.app.workspace.getActiveFile() ?? this.lastActiveMarkdownFile;
@@ -380,8 +381,8 @@ export default class OpencodePlugin extends Plugin {
 	/**
 	 * Open the terminal rooted at `cwd`, resuming the folder's most recently
 	 * updated session within `resumeWithinDays`, otherwise starting a new
-	 * session pre-filled with `attachPath` (vault-relative) as an `@path`
-	 * mention in the composer.
+	 * session. Either way `attachPath` (vault-relative) is pre-filled as an
+	 * `@path` mention in the composer.
 	 */
 	async openTerminalForTarget(cwd: string, attachPath: string | null): Promise<void> {
 		if (attachPath && await this.openFileSessionIfConfigured(cwd, attachPath)) return;
@@ -397,14 +398,15 @@ export default class OpencodePlugin extends Plugin {
 			: null;
 		if (recentTabs) mergeSessionTabs(cwd, recentTabs);
 
-		if (resumeId) {
+		const plan = planTerminalOpen(attachPath, resumeId);
+		if (plan.kind === "resume" && resumeId) {
 			this.sessionState.setOpenSession(resumeId, cwd);
 			this.pendingRouteSessionId = resumeId;
 		} else {
 			this.sessionState.setNewSession();
 			this.sessionCwd = cwd;
-			this.pendingAttachPath = attachPath;
 		}
+		this.pendingAttachPath = plan.attachPath;
 
 		await this.openOrRestartTerminal();
 
@@ -454,9 +456,12 @@ export default class OpencodePlugin extends Plugin {
 			);
 			const found = await client.findSessionByTitle(name, cwd);
 			const session = found ?? await client.createSession({ title: name, directory: cwd });
+			// The note is attached whether the per-file session was found or
+			// created, so resuming it still pre-fills the file.
+			const plan = planTerminalOpen(attachPath, session.id);
 			this.sessionState.setOpenSession(session.id, cwd);
 			this.pendingRouteSessionId = session.id;
-			this.pendingAttachPath = found ? null : attachPath;
+			this.pendingAttachPath = plan.attachPath;
 			await this.openOrRestartTerminal();
 			return true;
 		} catch (error) {

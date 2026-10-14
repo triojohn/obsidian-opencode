@@ -101,6 +101,30 @@ describe("PtySession", () => {
 		}
 	});
 
+	it("invokes first-output callbacks once the child produces output", () => {
+		const platform = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+		const child = createProcess();
+		vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+		const terminal = { rows: 24, cols: 80, write: vi.fn(), writeln: vi.fn() };
+
+		try {
+			const session = new PtySession();
+			session.spawn(terminal as unknown as Terminal, { opencodePath: "opencode", cwd: "/tmp", args: [] });
+
+			const fired: string[] = [];
+			session.onFirstOutput(() => fired.push("queued"));
+			expect(fired).toEqual([]);
+
+			child.stdout.emit("data", Buffer.from("hello"));
+			expect(fired).toEqual(["queued"]);
+
+			session.onFirstOutput(() => fired.push("late"));
+			expect(fired).toEqual(["queued", "late"]);
+		} finally {
+			platform.mockRestore();
+		}
+	});
+
 	it("waits for Unix PTY output to close before completing shutdown", async () => {
 		const platform = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 		const child = createProcess();

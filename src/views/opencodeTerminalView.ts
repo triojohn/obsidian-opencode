@@ -767,15 +767,17 @@ export class OpencodeTerminalView extends ItemView {
 			routeSessionId: routeSessionId ?? undefined,
 		});
 
-		// Pre-fill the active note as an @mention for a freshly opened session.
-		// No Enter: the mention menu stays open for the user to confirm.
+		// Pre-fill the active note as an @mention, on every open. Waits for the
+		// child's first output instead of a fixed delay: ConPTY takes seconds to
+		// start, so a timer is unreliable. No Enter: the mention menu stays open
+		// for the user to confirm. Existing composer text is left untouched.
 		const attachPath = this.plugin.pendingAttachPath;
 		this.plugin.pendingAttachPath = null;
-		if (attachPath && this.ptySession.getStdin()) {
-			window.setTimeout(() => {
+		if (attachPath) {
+			this.ptySession.onFirstOutput(() => {
 				if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
 				terminal.input(`@${attachPath}`, true);
-			}, 1500);
+			});
 		}
 	}
 
