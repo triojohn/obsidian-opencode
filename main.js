@@ -20044,6 +20044,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
 var path11 = __toESM(require("node:path"));
+var fs8 = __toESM(require("node:fs"));
 
 // src/settings.ts
 var DEFAULT_SETTINGS = {
@@ -24755,8 +24756,25 @@ var PtySession = class {
     const entry = path8.join(this.pluginDirectory, "native", "node-pty", "lib", "index.js");
     return fs6.existsSync(entry) ? entry : null;
   }
+  /**
+   * Logs which PTY host the Windows session will use, so a startup log shows
+   * whether the bundled-ConPTY node-pty path was taken or the zigpty fallback.
+   *
+   * @param nodePtyEntry Resolved vendored node-pty entry, or null for the fallback
+   * @param nodeArchitecture Architecture reported by the Node.js on PATH
+   */
+  logPtyHostSelection(nodePtyEntry, nodeArchitecture) {
+    var _a;
+    if (nodePtyEntry) {
+      console.log("[obsidian-opencode] PTY host: node-pty (bundled ConPTY)");
+      return;
+    }
+    const entry = path8.join((_a = this.pluginDirectory) != null ? _a : "<unknown plugin directory>", "native", "node-pty", "lib", "index.js");
+    const reason = nodeArchitecture === "x64" ? `node-pty entry missing at ${entry}` : "not win32 x64";
+    console.warn(`[obsidian-opencode] PTY host: zigpty (fallback: ${reason})`);
+  }
   spawn(terminal, options) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g;
     this.windowsGracefulExitRequested = false;
     if (process.platform === "win32") {
       const windowsBuild = Number(os6.release().split(".")[2]);
@@ -24819,15 +24837,17 @@ Unsupported Windows Node.js architecture: ${nodeArchitecture}\r
       }
       try {
         const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
-        if (nodeArchitecture === "x64" && !nodePtyEntry) {
-          console.warn(`OpenCode: vendored node-pty entry not found under ${(_c = this.pluginDirectory) != null ? _c : "<unknown plugin directory>"}; falling back to zigpty, which may lose mouse support on Windows.`);
-        }
+        this.logPtyHostSelection(nodePtyEntry, nodeArchitecture);
+        const nativeEntry = nodePtyEntry != null ? nodePtyEntry : materializeWindowsPtyNative(nodeArchitecture);
+        const columns = Math.min(32767, Math.max(1, terminal.cols));
+        const rows = Math.min(32767, Math.max(1, terminal.rows));
+        console.log(`[obsidian-opencode] PTY spawn: node=${nodeExecutable} host=${nodePtyEntry ? "node-pty" : "zigpty"} entry=${nativeEntry} cols=${columns} rows=${rows} cwd=${options.cwd} cli=${executable}`);
         ptyProcess = windowsPtyProcess = (0, import_child_process2.spawn)(nodeExecutable, [
           "-e",
           nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,
-          nodePtyEntry != null ? nodePtyEntry : materializeWindowsPtyNative(nodeArchitecture),
-          String(Math.min(32767, Math.max(1, terminal.cols))),
-          String(Math.min(32767, Math.max(1, terminal.rows))),
+          nativeEntry,
+          String(columns),
+          String(rows),
           executable,
           ...args
         ], {
@@ -24843,13 +24863,13 @@ Unsupported Windows Node.js architecture: ${nodeArchitecture}\r
         });
         this.windowsJobProcess = jobProcess;
         let jobReady = false;
-        (_d = jobProcess.stdout) == null ? void 0 : _d.once("data", () => {
+        (_c = jobProcess.stdout) == null ? void 0 : _c.once("data", () => {
           var _a2;
           jobReady = true;
           const startPipe = (_a2 = ptyProcess.stdio) == null ? void 0 : _a2[4];
           startPipe == null ? void 0 : startPipe.write("start\n");
         });
-        (_e = jobProcess.stderr) == null ? void 0 : _e.on("data", (chunk) => {
+        (_d = jobProcess.stderr) == null ? void 0 : _d.on("data", (chunk) => {
           const message = chunk.toString();
           if (!message.includes("Unable to read the Windows PTY host exit code")) terminal.write(chunk);
         });
@@ -24870,7 +24890,7 @@ Unable to secure the OpenCode process tree (job host exited with code ${code}).\
         });
       } catch (error) {
         windowsPtyProcess == null ? void 0 : windowsPtyProcess.kill();
-        (_f = this.windowsJobProcess) == null ? void 0 : _f.kill();
+        (_e = this.windowsJobProcess) == null ? void 0 : _e.kill();
         this.windowsJobProcess = null;
         this.backend = null;
         const message = error instanceof Error ? error.message : String(error);
@@ -24888,7 +24908,7 @@ Unable to start the OpenCode Windows PTY: ${message}\r
       });
     }
     this.ptyProcess = ptyProcess;
-    (_g = ptyProcess.stdout) == null ? void 0 : _g.on("data", (chunk) => {
+    (_f = ptyProcess.stdout) == null ? void 0 : _f.on("data", (chunk) => {
       const str = chunk.toString();
       if (str.includes("org.freedesktop.DBus.Error.ServiceUnknown")) {
         new import_obsidian9.Notice(`Additional sandbox permissions are required. Run '${FLATPAK_OVERRIDE_COMMAND}' on your host system to allow command execution.`, 15e3);
@@ -24908,7 +24928,7 @@ Unable to start the OpenCode Windows PTY: ${message}\r
         }, 100);
       }
     });
-    (_h = ptyProcess.stderr) == null ? void 0 : _h.on("data", (chunk) => {
+    (_g = ptyProcess.stderr) == null ? void 0 : _g.on("data", (chunk) => {
       const str = chunk.toString();
       console.error("PTY stderr:", str);
       if (this.backend === 1 /* WindowsConPty */) {
@@ -25404,6 +25424,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     }));
     this.addSettingTab(new OpencodeSettingTab(this.app, this));
     this.registerEditorSuggest(new OpencodeEditorSuggest(this));
+    this.logPtyHostDiagnostics();
   }
   async loadSettings() {
     const data = await this.loadData();
@@ -25429,6 +25450,36 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const adapter = this.app.vault.adapter;
     const basePath = adapter instanceof import_obsidian10.FileSystemAdapter ? adapter.getBasePath() : "";
     return resolvePluginDirectory(this.manifest.dir, basePath, this.app.vault.configDir, this.manifest.id);
+  }
+  /**
+   * Logs the resolved plugin directory and the vendored PTY assets to the
+   * developer console at startup, so a support log shows which PTY path the
+   * plugin will take before any terminal is opened.
+   */
+  logPtyHostDiagnostics() {
+    var _a, _b;
+    const prefix = "[obsidian-opencode]";
+    const directory = this.pluginDirectory();
+    const nodePtyDirectory = path11.join(directory, "native", "node-pty");
+    const entry = path11.join(nodePtyDirectory, "lib", "index.js");
+    const entryExists = fs8.existsSync(entry);
+    console.log(`${prefix} plugin directory: ${directory}`);
+    console.log(`${prefix} node-pty entry: ${entry} (found=${entryExists})`);
+    if (entryExists) {
+      try {
+        const manifest = JSON.parse(fs8.readFileSync(path11.join(nodePtyDirectory, "package.json"), "utf8"));
+        console.log(`${prefix} node-pty version: ${(_a = manifest.version) != null ? _a : "<unknown>"}`);
+      } catch (error) {
+        console.log(`${prefix} node-pty version: unreadable (${error instanceof Error ? error.message : String(error)})`);
+      }
+    }
+    if (process.platform === "win32") {
+      const conptyDirectory = path11.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
+      const dll = fs8.existsSync(path11.join(conptyDirectory, "conpty.dll"));
+      const openConsole = fs8.existsSync(path11.join(conptyDirectory, "OpenConsole.exe"));
+      console.log(`${prefix} bundled ConPTY: conpty.dll=${dll} OpenConsole.exe=${openConsole}`);
+    }
+    console.log(`${prefix} runtime: platform=${process.platform} arch=${process.arch} electron=${(_b = process.versions.electron) != null ? _b : "<none>"} node=${process.versions.node}`);
   }
   async closePtySession(session) {
     await this.ptySessions.close(session);

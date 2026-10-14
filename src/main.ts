@@ -1,5 +1,6 @@
 import { Plugin, FileSystemAdapter, Notice, Platform, addIcon, setIcon, TFile, TFolder } from "obsidian";
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { OpencodePluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { OpencodeSettingTab } from "./settingsTab";
 import { OpencodeTerminalView, OPENCODE_TERMINAL_VIEW_TYPE } from "./views/opencodeTerminalView";
@@ -186,6 +187,8 @@ export default class OpencodePlugin extends Plugin {
 		this.addSettingTab(new OpencodeSettingTab(this.app, this));
 
 		this.registerEditorSuggest(new OpencodeEditorSuggest(this));
+
+		this.logPtyHostDiagnostics();
 	}
 
 	async loadSettings() {
@@ -218,6 +221,36 @@ export default class OpencodePlugin extends Plugin {
 		const adapter = this.app.vault.adapter;
 		const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
 		return resolvePluginDirectory(this.manifest.dir, basePath, this.app.vault.configDir, this.manifest.id);
+	}
+
+	/**
+	 * Logs the resolved plugin directory and the vendored PTY assets to the
+	 * developer console at startup, so a support log shows which PTY path the
+	 * plugin will take before any terminal is opened.
+	 */
+	private logPtyHostDiagnostics(): void {
+		const prefix = "[obsidian-opencode]";
+		const directory = this.pluginDirectory();
+		const nodePtyDirectory = path.join(directory, "native", "node-pty");
+		const entry = path.join(nodePtyDirectory, "lib", "index.js");
+		const entryExists = fs.existsSync(entry);
+		console.log(`${prefix} plugin directory: ${directory}`);
+		console.log(`${prefix} node-pty entry: ${entry} (found=${entryExists})`);
+		if (entryExists) {
+			try {
+				const manifest = JSON.parse(fs.readFileSync(path.join(nodePtyDirectory, "package.json"), "utf8")) as { version?: string };
+				console.log(`${prefix} node-pty version: ${manifest.version ?? "<unknown>"}`);
+			} catch (error) {
+				console.log(`${prefix} node-pty version: unreadable (${error instanceof Error ? error.message : String(error)})`);
+			}
+		}
+		if (process.platform === "win32") {
+			const conptyDirectory = path.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
+			const dll = fs.existsSync(path.join(conptyDirectory, "conpty.dll"));
+			const openConsole = fs.existsSync(path.join(conptyDirectory, "OpenConsole.exe"));
+			console.log(`${prefix} bundled ConPTY: conpty.dll=${dll} OpenConsole.exe=${openConsole}`);
+		}
+		console.log(`${prefix} runtime: platform=${process.platform} arch=${process.arch} electron=${process.versions.electron ?? "<none>"} node=${process.versions.node}`);
 	}
 
 	async closePtySession(session: PtySession): Promise<void> {

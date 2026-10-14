@@ -365,6 +365,23 @@ export class PtySession {
 		return fs.existsSync(entry) ? entry : null;
 	}
 
+	/**
+	 * Logs which PTY host the Windows session will use, so a startup log shows
+	 * whether the bundled-ConPTY node-pty path was taken or the zigpty fallback.
+	 *
+	 * @param nodePtyEntry Resolved vendored node-pty entry, or null for the fallback
+	 * @param nodeArchitecture Architecture reported by the Node.js on PATH
+	 */
+	private logPtyHostSelection(nodePtyEntry: string | null, nodeArchitecture: string): void {
+		if (nodePtyEntry) {
+			console.log("[obsidian-opencode] PTY host: node-pty (bundled ConPTY)");
+			return;
+		}
+		const entry = path.join(this.pluginDirectory ?? "<unknown plugin directory>", "native", "node-pty", "lib", "index.js");
+		const reason = nodeArchitecture === "x64" ? `node-pty entry missing at ${entry}` : "not win32 x64";
+		console.warn(`[obsidian-opencode] PTY host: zigpty (fallback: ${reason})`);
+	}
+
 	spawn(terminal: Terminal, options: PtySessionOptions): void {
 		this.windowsGracefulExitRequested = false;
 		if (process.platform === "win32") {
@@ -443,15 +460,17 @@ export class PtySession {
 				// sequences through on Windows builds where the system conhost
 				// strips them. It is only vendored for x64.
 				const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
-				if (nodeArchitecture === "x64" && !nodePtyEntry) {
-					console.warn(`OpenCode: vendored node-pty entry not found under ${this.pluginDirectory ?? "<unknown plugin directory>"}; falling back to zigpty, which may lose mouse support on Windows.`);
-				}
+				this.logPtyHostSelection(nodePtyEntry, nodeArchitecture);
+				const nativeEntry = nodePtyEntry ?? materializeWindowsPtyNative(nodeArchitecture);
+				const columns = Math.min(32767, Math.max(1, terminal.cols));
+				const rows = Math.min(32767, Math.max(1, terminal.rows));
+				console.log(`[obsidian-opencode] PTY spawn: node=${nodeExecutable} host=${nodePtyEntry ? "node-pty" : "zigpty"} entry=${nativeEntry} cols=${columns} rows=${rows} cwd=${options.cwd} cli=${executable}`);
 				ptyProcess = windowsPtyProcess = spawn(nodeExecutable, [
 					"-e",
 					nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,
-					nodePtyEntry ?? materializeWindowsPtyNative(nodeArchitecture),
-					String(Math.min(32767, Math.max(1, terminal.cols))),
-					String(Math.min(32767, Math.max(1, terminal.rows))),
+					nativeEntry,
+					String(columns),
+					String(rows),
 					executable,
 					...args,
 				], {
