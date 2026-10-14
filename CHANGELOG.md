@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Installation now also requires the vendored `native/node-pty/` directory. It provides bundled ConPTY, which restores terminal mouse input on Windows x64; without it the plugin falls back to zigpty and mouse reports are dropped.
+
 ## [2.3.1] - 2026-10-06
 
 ### Fixed

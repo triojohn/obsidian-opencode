@@ -11,7 +11,7 @@
 ## Раскладка
 - Код: `C:\GitHub\obsidian-opencode` (этот репозиторий), рабочая ветка `vault`.
 - Волт: только карточка проекта; исходников в волте нет.
-- Собранный `main.js` ставится в `<vault>\.obsidian\plugins\obsidian-opencode\`.
+- Установочные артефакты `main.js`, `styles.css` и каталог `native/node-pty/` ставятся в `<vault>\.obsidian\plugins\obsidian-opencode\` (`native/node-pty/` — вендоренный node-pty с bundled ConPTY для мыши на Windows x64).
 
 ## Upstream
 - MIT, ветка `main`, версия upstream 2.3.1 (собственный `manifest.json` форка — `1.0.0`), исходники в `src/` (TypeScript), сборка esbuild (`npm run build`, `npm run dev`), требуется Node >= 22.12.
@@ -66,7 +66,7 @@
 
 ### Сборка и установка
 - Требуется Node ≥22.12 (на рабочей машине — портативный `C:\Tools\node22`, v22.23.3).
-- `npm ci` → `npm run build` → скопировать `main.js` и `styles.css` в `<vault>\.obsidian\plugins\obsidian-opencode\`.
+- `npm ci` → `npm run build` → скопировать `main.js`, `styles.css` и каталог `native/node-pty/` в `<vault>\.obsidian\plugins\obsidian-opencode\`.
 
 ## Смена идентификатора плагина (own id)
 

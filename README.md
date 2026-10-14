@@ -75,7 +75,8 @@ I've always wanted a natural way to let opencode discover and use folder templat
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/kriss-spy/obsidian-opencode/releases/latest)
 2. Create a folder named `opencode` in your vault's `.obsidian/plugins/` directory
 3. Copy the downloaded files into that folder
-4. Reload Obsidian and enable the **OpenCode** plugin in Community Plugins settings
+4. On Windows x64, also copy the `native/node-pty/` directory from this repository into the plugin folder. It bundles ConPTY, which the plugin uses to make terminal mouse input work on Windows; without it the plugin falls back to zigpty and mouse reports are dropped.
+5. Reload Obsidian and enable the **OpenCode** plugin in Community Plugins settings
 
 ## Usage
 
