@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawn, ChildProcess, execFileSync } from "child_process";
-import { accessSync, statSync, writeFileSync } from "fs";
+import { accessSync, existsSync, statSync, writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { EventEmitter } from "events";
@@ -59,6 +59,7 @@ describe("PtySession", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(accessSync).mockImplementation(() => undefined);
+		vi.mocked(existsSync).mockReturnValue(false);
 		vi.mocked(statSync).mockReturnValue({ isFile: () => true } as ReturnType<typeof statSync>);
 		vi.stubGlobal("window", {
 			setTimeout: (callback: () => void, delay?: number) => global.setTimeout(callback, delay),
@@ -399,6 +400,77 @@ print(json.dumps({"after_partial": after_partial, "after_complete": resizes}))
 			}));
 			job.stdout.emit("data", Buffer.from("ready\n"));
 			expect((child.stdio[4] as { write: ReturnType<typeof vi.fn> }).write).toHaveBeenCalledWith("start\n");
+		} finally {
+			platform.mockRestore();
+		}
+	});
+
+	it("uses the vendored node-pty with bundled ConPTY on Windows x64", () => {
+		const platform = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+		vi.mocked(existsSync).mockReturnValue(true);
+		const child = createProcess();
+		child.pid = 1234;
+		const job = createProcess();
+		job.pid = 5678;
+		vi.mocked(spawn)
+			.mockReturnValueOnce(child as unknown as ChildProcess)
+			.mockReturnValueOnce(job as unknown as ChildProcess);
+		const terminal = {
+			rows: 30,
+			cols: 100,
+			write: vi.fn(),
+			writeln: vi.fn(),
+		};
+
+		try {
+			new PtySession("C:\\vault\\.obsidian\\plugins\\obsidian-opencode").spawn(terminal as unknown as Terminal, {
+				opencodePath: "opencode",
+				cwd: "C:\\vault",
+				args: [],
+			});
+
+			expect(spawn).toHaveBeenNthCalledWith(1, expect.stringMatching(/node\.exe$/i), [
+				"-e",
+				expect.stringContaining("useConptyDll: true"),
+				expect.stringMatching(/[\\/]native[\\/]node-pty[\\/]lib[\\/]index\.js$/i),
+				"100",
+				"30",
+				expect.stringMatching(/opencode(?:\.[A-Z]+)?$/i),
+			], expect.objectContaining({
+				cwd: "C:\\vault",
+				stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"],
+				windowsHide: true,
+			}));
+			expect(terminal.writeln).not.toHaveBeenCalled();
+		} finally {
+			platform.mockRestore();
+		}
+	});
+
+	it("falls back to the zigpty host when the vendored node-pty is missing", () => {
+		const platform = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+		const child = createProcess();
+		child.pid = 1234;
+		const job = createProcess();
+		job.pid = 5678;
+		vi.mocked(spawn)
+			.mockReturnValueOnce(child as unknown as ChildProcess)
+			.mockReturnValueOnce(job as unknown as ChildProcess);
+
+		try {
+			new PtySession("C:\\vault\\.obsidian\\plugins\\obsidian-opencode").spawn(
+				{ rows: 24, cols: 80, write: vi.fn(), writeln: vi.fn() } as unknown as Terminal,
+				{ opencodePath: "opencode", cwd: "C:\\vault", args: [] }
+			);
+
+			expect(spawn).toHaveBeenNthCalledWith(1, expect.stringMatching(/node\.exe$/i), [
+				"-e",
+				expect.stringContaining("native.spawn"),
+				expect.stringMatching(/[\\/]zigpty-x64\.node$/i),
+				"80",
+				"24",
+				expect.stringMatching(/opencode(?:\.[A-Z]+)?$/i),
+			], expect.any(Object));
 		} finally {
 			platform.mockRestore();
 		}

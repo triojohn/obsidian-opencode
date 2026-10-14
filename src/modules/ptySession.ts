@@ -198,6 +198,67 @@ process.on("SIGTERM", () => {
 });
 `;
 
+const WINDOWS_PTY_HOST_NODEPTY_JS = String.raw`
+const fs = require("fs");
+const [entryPath, colsText, rowsText, file, ...args] = process.argv.slice(1);
+let terminal;
+let ready = false;
+let pendingResize;
+let pendingWrites = [];
+function start() {
+  const pty = require(entryPath);
+  try {
+    terminal = pty.spawn(file, args, {
+      name: "xterm-256color",
+      cols: Number(colsText),
+      rows: Number(rowsText),
+      cwd: process.cwd(),
+      env: process.env,
+      useConpty: true,
+      useConptyDll: true,
+    });
+  } catch (error) {
+    process.stderr.write("Unable to start the node-pty terminal: " + (error && error.stack ? error.stack : String(error)) + "\n");
+    process.exit(1);
+    return;
+  }
+  terminal.onData((data) => {
+    if (!ready) {
+      ready = true;
+      if (pendingResize) terminal.resize(pendingResize.cols, pendingResize.rows);
+      pendingResize = undefined;
+      for (const pendingWrite of pendingWrites) terminal.write(pendingWrite);
+      pendingWrites = [];
+    }
+    process.stdout.write(data);
+  });
+  terminal.onExit(({ exitCode }) => process.exit(exitCode));
+}
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (data) => {
+  if (ready) terminal.write(data);
+  else pendingWrites.push(data);
+});
+let pending = "";
+fs.createReadStream(null, { fd: 3 }).setEncoding("utf8").on("data", (data) => {
+  pending += data;
+  let newline;
+  while ((newline = pending.indexOf("\n")) >= 0) {
+    const [cols, rows] = pending.slice(0, newline).split("x").map(Number);
+    pending = pending.slice(newline + 1);
+    if (cols > 0 && rows > 0) {
+      if (ready) terminal.resize(cols, rows);
+      else pendingResize = { cols, rows };
+    }
+  }
+});
+fs.createReadStream(null, { fd: 4 }).once("data", start);
+process.on("SIGTERM", () => {
+  if (terminal) terminal.kill();
+  else process.exit(0);
+});
+`;
+
 const materializedWindowsPty = new Map<string, string>();
 let materializedWindowsPtyJobHost: string | null = null;
 
@@ -289,6 +350,21 @@ export class PtySession {
 	private windowsInterruptResetTimer: number | null = null;
 	private windowsGracefulExitRequested = false;
 
+	/** Plugin directory; used to locate the vendored node-pty with bundled ConPTY. */
+	constructor(private readonly pluginDirectory?: string) {}
+
+	/**
+	 * Resolves the vendored node-pty entry point inside this plugin.
+	 *
+	 * Returns null when the plugin directory is unknown or the vendored copy is
+	 * missing, so the caller can fall back to the zigpty host.
+	 */
+	private windowsNodePtyEntry(): string | null {
+		if (!this.pluginDirectory) return null;
+		const entry = path.join(this.pluginDirectory, "native", "node-pty", "lib", "index.js");
+		return fs.existsSync(entry) ? entry : null;
+	}
+
 	spawn(terminal: Terminal, options: PtySessionOptions): void {
 		this.windowsGracefulExitRequested = false;
 		if (process.platform === "win32") {
@@ -363,10 +439,14 @@ export class PtySession {
 				return;
 			}
 			try {
+				// node-pty's bundled ConPTY (`useConptyDll`) passes mouse control
+				// sequences through on Windows builds where the system conhost
+				// strips them. It is only vendored for x64.
+				const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
 				ptyProcess = windowsPtyProcess = spawn(nodeExecutable, [
 					"-e",
-					WINDOWS_PTY_HOST_JS,
-					materializeWindowsPtyNative(nodeArchitecture),
+					nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,
+					nodePtyEntry ?? materializeWindowsPtyNative(nodeArchitecture),
 					String(Math.min(32767, Math.max(1, terminal.cols))),
 					String(Math.min(32767, Math.max(1, terminal.rows))),
 					executable,

@@ -210,7 +210,14 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	createPtySession(): PtySession {
-		return this.ptySessions.register(new PtySession());
+		return this.ptySessions.register(new PtySession(this.pluginDirectory()));
+	}
+
+	private pluginDirectory(): string {
+		if (this.manifest.dir) return this.manifest.dir;
+		const adapter = this.app.vault.adapter;
+		const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
+		return path.join(basePath, this.app.vault.configDir, "plugins", this.manifest.id);
 	}
 
 	async closePtySession(session: PtySession): Promise<void> {

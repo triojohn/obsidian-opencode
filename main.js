@@ -24605,6 +24605,66 @@ process.on("SIGTERM", () => {
   else process.exit(0);
 });
 `;
+var WINDOWS_PTY_HOST_NODEPTY_JS = String.raw`
+const fs = require("fs");
+const [entryPath, colsText, rowsText, file, ...args] = process.argv.slice(1);
+let terminal;
+let ready = false;
+let pendingResize;
+let pendingWrites = [];
+function start() {
+  const pty = require(entryPath);
+  try {
+    terminal = pty.spawn(file, args, {
+      name: "xterm-256color",
+      cols: Number(colsText),
+      rows: Number(rowsText),
+      cwd: process.cwd(),
+      env: process.env,
+      useConpty: true,
+      useConptyDll: true,
+    });
+  } catch (error) {
+    process.stderr.write("Unable to start the node-pty terminal: " + (error && error.stack ? error.stack : String(error)) + "\n");
+    process.exit(1);
+    return;
+  }
+  terminal.onData((data) => {
+    if (!ready) {
+      ready = true;
+      if (pendingResize) terminal.resize(pendingResize.cols, pendingResize.rows);
+      pendingResize = undefined;
+      for (const pendingWrite of pendingWrites) terminal.write(pendingWrite);
+      pendingWrites = [];
+    }
+    process.stdout.write(data);
+  });
+  terminal.onExit(({ exitCode }) => process.exit(exitCode));
+}
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (data) => {
+  if (ready) terminal.write(data);
+  else pendingWrites.push(data);
+});
+let pending = "";
+fs.createReadStream(null, { fd: 3 }).setEncoding("utf8").on("data", (data) => {
+  pending += data;
+  let newline;
+  while ((newline = pending.indexOf("\n")) >= 0) {
+    const [cols, rows] = pending.slice(0, newline).split("x").map(Number);
+    pending = pending.slice(newline + 1);
+    if (cols > 0 && rows > 0) {
+      if (ready) terminal.resize(cols, rows);
+      else pendingResize = { cols, rows };
+    }
+  }
+});
+fs.createReadStream(null, { fd: 4 }).once("data", start);
+process.on("SIGTERM", () => {
+  if (terminal) terminal.kill();
+  else process.exit(0);
+});
+`;
 var materializedWindowsPty = /* @__PURE__ */ new Map();
 var materializedWindowsPtyJobHost = null;
 function materializeWindowsPtyNative(architecture) {
@@ -24668,13 +24728,26 @@ function withTimeout(promise, timeoutMs) {
   });
 }
 var PtySession = class {
-  constructor() {
+  /** Plugin directory; used to locate the vendored node-pty with bundled ConPTY. */
+  constructor(pluginDirectory) {
+    this.pluginDirectory = pluginDirectory;
     this.ptyProcess = null;
     this.backend = null;
     this.windowsJobProcess = null;
     this.windowsInterruptPending = false;
     this.windowsInterruptResetTimer = null;
     this.windowsGracefulExitRequested = false;
+  }
+  /**
+   * Resolves the vendored node-pty entry point inside this plugin.
+   *
+   * Returns null when the plugin directory is unknown or the vendored copy is
+   * missing, so the caller can fall back to the zigpty host.
+   */
+  windowsNodePtyEntry() {
+    if (!this.pluginDirectory) return null;
+    const entry = path8.join(this.pluginDirectory, "native", "node-pty", "lib", "index.js");
+    return fs6.existsSync(entry) ? entry : null;
   }
   spawn(terminal, options) {
     var _a, _b, _c, _d, _e, _f, _g;
@@ -24739,10 +24812,11 @@ Unsupported Windows Node.js architecture: ${nodeArchitecture}\r
         return;
       }
       try {
+        const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
         ptyProcess = windowsPtyProcess = (0, import_child_process2.spawn)(nodeExecutable, [
           "-e",
-          WINDOWS_PTY_HOST_JS,
-          materializeWindowsPtyNative(nodeArchitecture),
+          nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,
+          nodePtyEntry != null ? nodePtyEntry : materializeWindowsPtyNative(nodeArchitecture),
           String(Math.min(32767, Math.max(1, terminal.cols))),
           String(Math.min(32767, Math.max(1, terminal.rows))),
           executable,
@@ -25340,7 +25414,13 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     settings == null ? void 0 : settings.openTabById(this.manifest.id);
   }
   createPtySession() {
-    return this.ptySessions.register(new PtySession());
+    return this.ptySessions.register(new PtySession(this.pluginDirectory()));
+  }
+  pluginDirectory() {
+    if (this.manifest.dir) return this.manifest.dir;
+    const adapter = this.app.vault.adapter;
+    const basePath = adapter instanceof import_obsidian10.FileSystemAdapter ? adapter.getBasePath() : "";
+    return path11.join(basePath, this.app.vault.configDir, "plugins", this.manifest.id);
   }
   async closePtySession(session) {
     await this.ptySessions.close(session);
