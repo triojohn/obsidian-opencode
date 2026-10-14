@@ -21,6 +21,7 @@ import {
 	findOpenCodeScrollRegionRows,
 	findOpenCodeScrollbarThumb,
 	isOpenCodePicker,
+	isMouseEmulationAllowed,
 	pickerTargetAtRow,
 	SCROLL_PAGE_DOWN,
 	SCROLL_PAGE_UP,
@@ -421,8 +422,19 @@ export class OpencodeTerminalView extends ItemView {
 		const renderDisposable = terminal.onRender(updateScrollbar);
 		this.register(() => renderDisposable.dispose());
 
+		const emulationAllowed = (): boolean =>
+			isMouseEmulationAllowed(process.platform, terminal.modes.mouseTrackingMode);
+		let loggedMouseTrackingMode = false;
+		const logMouseTrackingMode = () => {
+			if (loggedMouseTrackingMode) return;
+			loggedMouseTrackingMode = true;
+			console.log(`[obsidian-opencode] mouseTrackingMode=${terminal.modes.mouseTrackingMode}`);
+		};
+		termContainer.addEventListener("mousedown", logMouseTrackingMode, true);
+		this.register(() => termContainer.removeEventListener("mousedown", logMouseTrackingMode, true));
+
 		const handleMessageWheel = (event: WheelEvent) => {
-			if (process.platform !== "win32" || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+			if (!emulationAllowed() || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
 			event.preventDefault();
 			event.stopImmediatePropagation();
 			terminal.input(event.deltaY < 0 ? SCROLL_PAGE_UP : SCROLL_PAGE_DOWN, true);
@@ -431,7 +443,7 @@ export class OpencodeTerminalView extends ItemView {
 		this.register(() => termContainer.removeEventListener("wheel", handleMessageWheel, true));
 
 		const handleScrollbarMouse = (event: MouseEvent) => {
-			if (process.platform !== "win32" || event.button !== 0) return;
+			if (!emulationAllowed() || event.button !== 0) return;
 			if ((event.target as Element).closest(".opencode-terminal-scrollbar")) return;
 			const cell = terminalCellAt(event);
 			const thumb = findOpenCodeScrollbarThumb(terminal.buffer.active, terminal.rows);
@@ -452,7 +464,7 @@ export class OpencodeTerminalView extends ItemView {
 		};
 		termContainer.addEventListener("mousedown", handleScrollbarMouse, true);
 		const handleScrollbarRailMouse = (event: MouseEvent) => {
-			if (event.button !== 0) return;
+			if (!emulationAllowed() || event.button !== 0) return;
 			const cell = terminalCellAt(event);
 			const thumb = findOpenCodeScrollbarThumb(terminal.buffer.active, terminal.rows);
 			if (!cell || !thumb) return;
@@ -512,11 +524,11 @@ export class OpencodeTerminalView extends ItemView {
 		});
 
 		const isMouseClickableTui = (): boolean => {
-			return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active, terminal.rows);
+			return emulationAllowed() && isOpenCodePicker(terminal.buffer.active, terminal.rows);
 		};
 		const moveCursorOnMouseDown = (event: MouseEvent) => {
 			terminal.focus();
-			if (process.platform !== "win32" || event.button !== 0 || isMouseClickableTui()) return;
+			if (!emulationAllowed() || event.button !== 0 || isMouseClickableTui()) return;
 			const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
 			if (!screen) return;
 			const rect = screen.getBoundingClientRect();
@@ -535,7 +547,7 @@ export class OpencodeTerminalView extends ItemView {
 		this.register(() => termContainer.removeEventListener("mousedown", moveCursorOnMouseDown));
 
 		const handlePickerMouse = (event: MouseEvent) => {
-			if (process.platform !== "win32" || event.button !== 0 || !isMouseClickableTui()) return;
+			if (!emulationAllowed() || event.button !== 0 || !isMouseClickableTui()) return;
 			const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
 			if (!screen) return;
 			const rect = screen.getBoundingClientRect();

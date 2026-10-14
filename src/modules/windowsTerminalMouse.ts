@@ -8,6 +8,10 @@ interface TerminalBuffer {
 	getLine(index: number): TerminalBufferLine | undefined;
 }
 
+export function isMouseEmulationAllowed(platform: string, mouseTrackingMode: string): boolean {
+	return platform === "win32" && mouseTrackingMode === "none";
+}
+
 export const CLEAR_PICKER_QUERY = "\x7f".repeat(200);
 export const SCROLL_PAGE_UP = "\x1b[5~";
 export const SCROLL_PAGE_DOWN = "\x1b[6~";

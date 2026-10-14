@@ -3,6 +3,7 @@ import {
 	findOpenCodeScrollbarThumb,
 	findOpenCodeScrollRegionRows,
 	isOpenCodePicker,
+	isMouseEmulationAllowed,
 	pickerTargetAtRow,
 	SCROLL_PAGE_DOWN,
 	SCROLL_PAGE_UP,
@@ -25,6 +26,14 @@ describe("Windows terminal mouse adapter", () => {
 		expect(isOpenCodePicker(buffer(["Sessions                         esc"]), 1)).toBe(true);
 		expect(isOpenCodePicker(buffer(["Select model                     esc"]), 1)).toBe(true);
 		expect(isOpenCodePicker(buffer(["ordinary terminal output"]), 1)).toBe(false);
+	});
+
+	it("allows Windows mouse emulation only while the terminal reports no mouse tracking", () => {
+		expect(isMouseEmulationAllowed("darwin", "none")).toBe(false);
+		expect(isMouseEmulationAllowed("linux", "any")).toBe(false);
+		expect(isMouseEmulationAllowed("win32", "none")).toBe(true);
+		expect(isMouseEmulationAllowed("win32", "any")).toBe(false);
+		expect(isMouseEmulationAllowed("win32", "vt200")).toBe(false);
 	});
 
 	it("ignores a picker line that scrolled above the viewport", () => {

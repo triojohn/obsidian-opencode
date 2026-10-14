@@ -22204,6 +22204,9 @@ function isImeKey(event) {
 }
 
 // src/modules/windowsTerminalMouse.ts
+function isMouseEmulationAllowed(platform, mouseTrackingMode) {
+  return platform === "win32" && mouseTrackingMode === "none";
+}
 var CLEAR_PICKER_QUERY = "\x7F".repeat(200);
 var SCROLL_PAGE_UP = "\x1B[5~";
 var SCROLL_PAGE_DOWN = "\x1B[6~";
@@ -23392,8 +23395,17 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     };
     const renderDisposable = terminal.onRender(updateScrollbar);
     this.register(() => renderDisposable.dispose());
+    const emulationAllowed = () => isMouseEmulationAllowed(process.platform, terminal.modes.mouseTrackingMode);
+    let loggedMouseTrackingMode = false;
+    const logMouseTrackingMode = () => {
+      if (loggedMouseTrackingMode) return;
+      loggedMouseTrackingMode = true;
+      console.log(`[obsidian-opencode] mouseTrackingMode=${terminal.modes.mouseTrackingMode}`);
+    };
+    termContainer.addEventListener("mousedown", logMouseTrackingMode, true);
+    this.register(() => termContainer.removeEventListener("mousedown", logMouseTrackingMode, true));
     const handleMessageWheel = (event) => {
-      if (process.platform !== "win32" || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      if (!emulationAllowed() || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       terminal.input(event.deltaY < 0 ? SCROLL_PAGE_UP : SCROLL_PAGE_DOWN, true);
@@ -23401,7 +23413,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     termContainer.addEventListener("wheel", handleMessageWheel, { capture: true, passive: false });
     this.register(() => termContainer.removeEventListener("wheel", handleMessageWheel, true));
     const handleScrollbarMouse = (event) => {
-      if (process.platform !== "win32" || event.button !== 0) return;
+      if (!emulationAllowed() || event.button !== 0) return;
       if (event.target.closest(".opencode-terminal-scrollbar")) return;
       const cell = terminalCellAt(event);
       const thumb = findOpenCodeScrollbarThumb(terminal.buffer.active, terminal.rows);
@@ -23422,7 +23434,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     };
     termContainer.addEventListener("mousedown", handleScrollbarMouse, true);
     const handleScrollbarRailMouse = (event) => {
-      if (event.button !== 0) return;
+      if (!emulationAllowed() || event.button !== 0) return;
       const cell = terminalCellAt(event);
       const thumb = findOpenCodeScrollbarThumb(terminal.buffer.active, terminal.rows);
       if (!cell || !thumb) return;
@@ -23483,12 +23495,12 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
       ownerDocument.removeEventListener("mouseup", stopScrollbarDrag, true);
     });
     const isMouseClickableTui = () => {
-      return process.platform === "win32" && isOpenCodePicker(terminal.buffer.active, terminal.rows);
+      return emulationAllowed() && isOpenCodePicker(terminal.buffer.active, terminal.rows);
     };
     const moveCursorOnMouseDown = (event) => {
       var _a2;
       terminal.focus();
-      if (process.platform !== "win32" || event.button !== 0 || isMouseClickableTui()) return;
+      if (!emulationAllowed() || event.button !== 0 || isMouseClickableTui()) return;
       const screen2 = (_a2 = terminal.element) == null ? void 0 : _a2.querySelector(".xterm-screen");
       if (!screen2) return;
       const rect = screen2.getBoundingClientRect();
@@ -23509,7 +23521,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     this.register(() => termContainer.removeEventListener("mousedown", moveCursorOnMouseDown));
     const handlePickerMouse = (event) => {
       var _a2;
-      if (process.platform !== "win32" || event.button !== 0 || !isMouseClickableTui()) return;
+      if (!emulationAllowed() || event.button !== 0 || !isMouseClickableTui()) return;
       const screen2 = (_a2 = terminal.element) == null ? void 0 : _a2.querySelector(".xterm-screen");
       if (!screen2) return;
       const rect = screen2.getBoundingClientRect();
