@@ -443,6 +443,9 @@ export class PtySession {
 				// sequences through on Windows builds where the system conhost
 				// strips them. It is only vendored for x64.
 				const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
+				if (nodeArchitecture === "x64" && !nodePtyEntry) {
+					console.warn(`OpenCode: vendored node-pty entry not found under ${this.pluginDirectory ?? "<unknown plugin directory>"}; falling back to zigpty, which may lose mouse support on Windows.`);
+				}
 				ptyProcess = windowsPtyProcess = spawn(nodeExecutable, [
 					"-e",
 					nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,

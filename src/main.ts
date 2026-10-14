@@ -15,6 +15,7 @@ import type { OpencodeSession } from "./utils/opencode";
 import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
 import { mergeSessionTabs } from "./utils/sessionTabs";
+import { resolvePluginDirectory } from "./utils/path";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -214,10 +215,9 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	private pluginDirectory(): string {
-		if (this.manifest.dir) return this.manifest.dir;
 		const adapter = this.app.vault.adapter;
 		const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
-		return path.join(basePath, this.app.vault.configDir, "plugins", this.manifest.id);
+		return resolvePluginDirectory(this.manifest.dir, basePath, this.app.vault.configDir, this.manifest.id);
 	}
 
 	async closePtySession(session: PtySession): Promise<void> {

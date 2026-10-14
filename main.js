@@ -21337,6 +21337,12 @@ var EditorServer = class {
 
 // src/utils/path.ts
 var path4 = __toESM(require("path"));
+function resolvePluginDirectory(manifestDir, vaultBasePath, configDir, pluginId) {
+  if (manifestDir) {
+    return path4.isAbsolute(manifestDir) ? manifestDir : path4.join(vaultBasePath, manifestDir);
+  }
+  return path4.join(vaultBasePath, configDir, "plugins", pluginId);
+}
 function normalizeVaultPath(filePath, vaultRoot) {
   if (!path4.isAbsolute(filePath)) {
     return filePath;
@@ -24750,7 +24756,7 @@ var PtySession = class {
     return fs6.existsSync(entry) ? entry : null;
   }
   spawn(terminal, options) {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     this.windowsGracefulExitRequested = false;
     if (process.platform === "win32") {
       const windowsBuild = Number(os6.release().split(".")[2]);
@@ -24813,6 +24819,9 @@ Unsupported Windows Node.js architecture: ${nodeArchitecture}\r
       }
       try {
         const nodePtyEntry = nodeArchitecture === "x64" ? this.windowsNodePtyEntry() : null;
+        if (nodeArchitecture === "x64" && !nodePtyEntry) {
+          console.warn(`OpenCode: vendored node-pty entry not found under ${(_c = this.pluginDirectory) != null ? _c : "<unknown plugin directory>"}; falling back to zigpty, which may lose mouse support on Windows.`);
+        }
         ptyProcess = windowsPtyProcess = (0, import_child_process2.spawn)(nodeExecutable, [
           "-e",
           nodePtyEntry ? WINDOWS_PTY_HOST_NODEPTY_JS : WINDOWS_PTY_HOST_JS,
@@ -24834,13 +24843,13 @@ Unsupported Windows Node.js architecture: ${nodeArchitecture}\r
         });
         this.windowsJobProcess = jobProcess;
         let jobReady = false;
-        (_c = jobProcess.stdout) == null ? void 0 : _c.once("data", () => {
+        (_d = jobProcess.stdout) == null ? void 0 : _d.once("data", () => {
           var _a2;
           jobReady = true;
           const startPipe = (_a2 = ptyProcess.stdio) == null ? void 0 : _a2[4];
           startPipe == null ? void 0 : startPipe.write("start\n");
         });
-        (_d = jobProcess.stderr) == null ? void 0 : _d.on("data", (chunk) => {
+        (_e = jobProcess.stderr) == null ? void 0 : _e.on("data", (chunk) => {
           const message = chunk.toString();
           if (!message.includes("Unable to read the Windows PTY host exit code")) terminal.write(chunk);
         });
@@ -24861,7 +24870,7 @@ Unable to secure the OpenCode process tree (job host exited with code ${code}).\
         });
       } catch (error) {
         windowsPtyProcess == null ? void 0 : windowsPtyProcess.kill();
-        (_e = this.windowsJobProcess) == null ? void 0 : _e.kill();
+        (_f = this.windowsJobProcess) == null ? void 0 : _f.kill();
         this.windowsJobProcess = null;
         this.backend = null;
         const message = error instanceof Error ? error.message : String(error);
@@ -24879,7 +24888,7 @@ Unable to start the OpenCode Windows PTY: ${message}\r
       });
     }
     this.ptyProcess = ptyProcess;
-    (_f = ptyProcess.stdout) == null ? void 0 : _f.on("data", (chunk) => {
+    (_g = ptyProcess.stdout) == null ? void 0 : _g.on("data", (chunk) => {
       const str = chunk.toString();
       if (str.includes("org.freedesktop.DBus.Error.ServiceUnknown")) {
         new import_obsidian9.Notice(`Additional sandbox permissions are required. Run '${FLATPAK_OVERRIDE_COMMAND}' on your host system to allow command execution.`, 15e3);
@@ -24899,7 +24908,7 @@ Unable to start the OpenCode Windows PTY: ${message}\r
         }, 100);
       }
     });
-    (_g = ptyProcess.stderr) == null ? void 0 : _g.on("data", (chunk) => {
+    (_h = ptyProcess.stderr) == null ? void 0 : _h.on("data", (chunk) => {
       const str = chunk.toString();
       console.error("PTY stderr:", str);
       if (this.backend === 1 /* WindowsConPty */) {
@@ -25417,10 +25426,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     return this.ptySessions.register(new PtySession(this.pluginDirectory()));
   }
   pluginDirectory() {
-    if (this.manifest.dir) return this.manifest.dir;
     const adapter = this.app.vault.adapter;
     const basePath = adapter instanceof import_obsidian10.FileSystemAdapter ? adapter.getBasePath() : "";
-    return path11.join(basePath, this.app.vault.configDir, "plugins", this.manifest.id);
+    return resolvePluginDirectory(this.manifest.dir, basePath, this.app.vault.configDir, this.manifest.id);
   }
   async closePtySession(session) {
     await this.ptySessions.close(session);
