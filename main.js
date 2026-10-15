@@ -22007,7 +22007,7 @@ var TerminalKeyRouter = class {
     const handler = (event) => {
       if (event.defaultPrevented || event.isComposing || isImeKey(event)) return;
       if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      if (event.key.toLowerCase() !== "c") return;
+      if (!matchesLetterKey(event, "KeyC", "c")) return;
       if (terminal.hasSelection()) copySelectionToSystemClipboard(terminal);
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -22099,11 +22099,10 @@ var TerminalKeyRouter = class {
     };
     const keydownHandler = (event) => {
       if (event.defaultPrevented || event.isComposing || !event.ctrlKey || event.altKey || event.metaKey) return;
-      const key = event.key.toLowerCase();
-      if (key === "c") {
+      if (matchesLetterKey(event, "KeyC", "c")) {
         if (!copySelection()) return;
         stop(event);
-      } else if (key === "v") {
+      } else if (matchesLetterKey(event, "KeyV", "v")) {
         stop(event);
         pasteFromWindows();
       }
@@ -22219,6 +22218,12 @@ var TerminalKeyRouter = class {
 };
 function isImeKey(event) {
   return Reflect.get(event, "keyCode") === 229;
+}
+function matchesLetterKey(event, code, letter) {
+  const expectedKeyCode = letter.toUpperCase().charCodeAt(0);
+  if (Reflect.get(event, "keyCode") === expectedKeyCode) return true;
+  if (event.code === code) return true;
+  return typeof event.key === "string" && event.key.toLowerCase() === letter;
 }
 function copySelectionToSystemClipboard(terminal) {
   const reportFailure = (error) => console.warn(`[obsidian-opencode] Failed to copy the terminal selection: ${String(error)}`);

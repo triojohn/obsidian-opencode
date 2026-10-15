@@ -559,4 +559,65 @@ describe("TerminalKeyRouter", () => {
 			vi.unstubAllGlobals();
 		}
 	});
+
+	it("swallows Ctrl+C on a non-latin layout by matching the key code", () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+			const event = context.dispatchKeydown({ key: "с", code: "KeyC", ctrlKey: true });
+
+			expect(event.preventDefault).toHaveBeenCalledOnce();
+			expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+			expect(writeText).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("copies the selection on Ctrl+C on a non-latin layout", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+			context.setSelection("selected text");
+
+			const event = context.dispatchKeydown({ key: "с", code: "KeyC", ctrlKey: true });
+			await vi.waitFor(() => expect(context.terminalClearSelection).toHaveBeenCalledOnce());
+
+			expect(writeText).toHaveBeenCalledWith("selected text");
+			expect(event.preventDefault).toHaveBeenCalledOnce();
+			expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("keeps matching Ctrl+C by key code when the event carries no layout character", () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+			const event = context.dispatchKeydown({ key: "Unidentified", code: "KeyC", keyCode: 67, ctrlKey: true });
+
+			expect(event.preventDefault).toHaveBeenCalledOnce();
+			expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("pastes into the terminal on Ctrl+V on a non-latin layout", async () => {
+		const clipboard = {
+			readText: vi.fn().mockResolvedValue("pasted text"),
+			writeText: vi.fn(),
+		};
+		const context = registerRouter({}, new Set(), undefined, clipboard);
+
+		const event = context.dispatchKeydown({ key: "м", code: "KeyV", ctrlKey: true });
+		await vi.waitFor(() => expect(context.terminalPaste).toHaveBeenCalledWith("pasted text"));
+
+		expect(event.preventDefault).toHaveBeenCalledOnce();
+		context.router.dispose();
+	});
 });

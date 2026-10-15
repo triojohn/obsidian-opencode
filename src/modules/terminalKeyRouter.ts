@@ -54,7 +54,7 @@ export class TerminalKeyRouter {
 		const handler = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.isComposing || isImeKey(event)) return;
 			if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-			if (event.key.toLowerCase() !== "c") return;
+			if (!matchesLetterKey(event, "KeyC", "c")) return;
 
 			if (terminal.hasSelection()) copySelectionToSystemClipboard(terminal);
 			event.preventDefault();
@@ -153,11 +153,10 @@ export class TerminalKeyRouter {
 
 		const keydownHandler = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.isComposing || !event.ctrlKey || event.altKey || event.metaKey) return;
-			const key = event.key.toLowerCase();
-			if (key === "c") {
+			if (matchesLetterKey(event, "KeyC", "c")) {
 				if (!copySelection()) return;
 				stop(event);
-			} else if (key === "v") {
+			} else if (matchesLetterKey(event, "KeyV", "v")) {
 				stop(event);
 				pasteFromWindows();
 			}
@@ -289,6 +288,17 @@ export class TerminalKeyRouter {
 // compatibility check isolated instead of using deprecated keyCode for keys.
 function isImeKey(event: KeyboardEvent): boolean {
 	return Reflect.get(event, "keyCode") === 229;
+}
+
+// xterm derives a control byte from keyCode/code, which do not depend on the
+// keyboard layout, while `key` holds the layout's character ("с" on a Russian
+// layout). Match the physical key first and keep `key` as the fallback for
+// synthetic events and tests.
+function matchesLetterKey(event: KeyboardEvent, code: string, letter: string): boolean {
+	const expectedKeyCode = letter.toUpperCase().charCodeAt(0);
+	if (Reflect.get(event, "keyCode") === expectedKeyCode) return true;
+	if (event.code === code) return true;
+	return typeof event.key === "string" && event.key.toLowerCase() === letter;
 }
 
 // Same contract as the WSL bridge: keep the selection when the write fails so
