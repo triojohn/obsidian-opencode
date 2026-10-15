@@ -29,6 +29,7 @@ import {
 	scrollbarPageInput,
 } from "../modules/windowsTerminalMouse";
 import { LifecycleQueue } from "../modules/lifecycleQueue";
+import { handleTerminalContextMenu } from "../modules/terminalContextMenu";
 import { loadOpenCodeHotkeys, loadOpenCodeManualCopy, loadOpenCodeSuspendHotkeys } from "../modules/openCodeKeymap";
 import { mergeEnvironmentVariables } from "../utils/environment";
 import { OpencodeClient, OpencodeError } from "../utils/opencode";
@@ -568,29 +569,33 @@ export class OpencodeTerminalView extends ItemView {
 			termContainer.removeEventListener("mouseup", handlePickerMouse, true);
 		});
 
-		if (windowsClipboard?.writeImagePng) {
-			const copyRenderedImage = (event: MouseEvent) => {
-				const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
-				if (!screen) return;
-				const rect = screen.getBoundingClientRect();
-				const column = Math.floor((event.clientX - rect.left) / (rect.width / terminal.cols));
-				const viewportRow = Math.floor((event.clientY - rect.top) / (rect.height / terminal.rows));
-				if (column < 0 || column >= terminal.cols || viewportRow < 0 || viewportRow >= terminal.rows) return;
-				const canvas = imageAddon.getImageAtBufferCell(column, terminal.buffer.active.viewportY + viewportRow);
-				if (!canvas) return;
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				const encoded = canvas.toDataURL("image/png").split(",", 2)[1];
-				void windowsClipboard.writeImagePng!(Buffer.from(encoded, "base64")).then(() => {
-					new Notice("Copied terminal image to the Windows clipboard.");
-				}, (error) => {
-					const detail = error instanceof Error ? error.message : String(error);
-					new Notice(`Windows clipboard: ${detail}`);
-				});
-			};
-			termContainer.addEventListener("contextmenu", copyRenderedImage, true);
-			this.register(() => termContainer.removeEventListener("contextmenu", copyRenderedImage, true));
-		}
+		// Obsidian builds a native Cut/Copy/Paste menu for any right click inside a
+		// view, and that menu closes the one OpenCode draws itself. Cancel the event
+		// for the whole terminal instead; the right-click SGR report reaches the TUI
+		// through mousedown/mouseup and is unaffected.
+		const writeImagePng = windowsClipboard?.writeImagePng;
+		const suppressHostContextMenu = (event: MouseEvent) => {
+			const screen = writeImagePng ? terminal.element?.querySelector<HTMLElement>(".xterm-screen") : null;
+			handleTerminalContextMenu(event, screen && writeImagePng ? {
+				grid: {
+					cols: terminal.cols,
+					rows: terminal.rows,
+					rect: screen.getBoundingClientRect(),
+				},
+				getImageAt: (column, viewportRow) =>
+					imageAddon.getImageAtBufferCell(column, terminal.buffer.active.viewportY + viewportRow) ?? null,
+				writeImagePng: (png) => {
+					void writeImagePng!(png).then(() => {
+						new Notice("Copied terminal image to the Windows clipboard.");
+					}, (error) => {
+						const detail = error instanceof Error ? error.message : String(error);
+						new Notice(`Windows clipboard: ${detail}`);
+					});
+				},
+			} : null);
+		};
+		termContainer.addEventListener("contextmenu", suppressHostContextMenu, true);
+		this.register(() => termContainer.removeEventListener("contextmenu", suppressHostContextMenu, true));
 
 		// Keep this server private to the embedded OpenCode process. Publishing a
 		// lock file would also connect unrelated OpenCode processes in this vault.

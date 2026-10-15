@@ -22320,6 +22320,22 @@ var LifecycleQueue = class {
   }
 };
 
+// src/modules/terminalContextMenu.ts
+function handleTerminalContextMenu(event, copy) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  if (!copy) return;
+  const { cols, rows, rect } = copy.grid;
+  const column = Math.floor((event.clientX - rect.left) / (rect.width / cols));
+  const viewportRow = Math.floor((event.clientY - rect.top) / (rect.height / rows));
+  if (column < 0 || column >= cols || viewportRow < 0 || viewportRow >= rows) return;
+  const canvas = copy.getImageAt(column, viewportRow);
+  if (!canvas) return;
+  const encoded = canvas.toDataURL("image/png").split(",", 2)[1];
+  copy.writeImagePng(Buffer.from(encoded, "base64"));
+}
+
 // src/utils/opencode.ts
 var import_obsidian3 = require("obsidian");
 var import_child_process = require("child_process");
@@ -23570,30 +23586,32 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
       termContainer.removeEventListener("mousedown", handlePickerMouse, true);
       termContainer.removeEventListener("mouseup", handlePickerMouse, true);
     });
-    if (windowsClipboard == null ? void 0 : windowsClipboard.writeImagePng) {
-      const copyRenderedImage = (event) => {
-        var _a2;
-        const screen2 = (_a2 = terminal.element) == null ? void 0 : _a2.querySelector(".xterm-screen");
-        if (!screen2) return;
-        const rect = screen2.getBoundingClientRect();
-        const column = Math.floor((event.clientX - rect.left) / (rect.width / terminal.cols));
-        const viewportRow = Math.floor((event.clientY - rect.top) / (rect.height / terminal.rows));
-        if (column < 0 || column >= terminal.cols || viewportRow < 0 || viewportRow >= terminal.rows) return;
-        const canvas = imageAddon.getImageAtBufferCell(column, terminal.buffer.active.viewportY + viewportRow);
-        if (!canvas) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const encoded = canvas.toDataURL("image/png").split(",", 2)[1];
-        void windowsClipboard.writeImagePng(Buffer.from(encoded, "base64")).then(() => {
-          new import_obsidian4.Notice("Copied terminal image to the Windows clipboard.");
-        }, (error) => {
-          const detail = error instanceof Error ? error.message : String(error);
-          new import_obsidian4.Notice(`Windows clipboard: ${detail}`);
-        });
-      };
-      termContainer.addEventListener("contextmenu", copyRenderedImage, true);
-      this.register(() => termContainer.removeEventListener("contextmenu", copyRenderedImage, true));
-    }
+    const writeImagePng = windowsClipboard == null ? void 0 : windowsClipboard.writeImagePng;
+    const suppressHostContextMenu = (event) => {
+      var _a2;
+      const screen2 = writeImagePng ? (_a2 = terminal.element) == null ? void 0 : _a2.querySelector(".xterm-screen") : null;
+      handleTerminalContextMenu(event, screen2 && writeImagePng ? {
+        grid: {
+          cols: terminal.cols,
+          rows: terminal.rows,
+          rect: screen2.getBoundingClientRect()
+        },
+        getImageAt: (column, viewportRow) => {
+          var _a3;
+          return (_a3 = imageAddon.getImageAtBufferCell(column, terminal.buffer.active.viewportY + viewportRow)) != null ? _a3 : null;
+        },
+        writeImagePng: (png) => {
+          void writeImagePng(png).then(() => {
+            new import_obsidian4.Notice("Copied terminal image to the Windows clipboard.");
+          }, (error) => {
+            const detail = error instanceof Error ? error.message : String(error);
+            new import_obsidian4.Notice(`Windows clipboard: ${detail}`);
+          });
+        }
+      } : null);
+    };
+    termContainer.addEventListener("contextmenu", suppressHostContextMenu, true);
+    this.register(() => termContainer.removeEventListener("contextmenu", suppressHostContextMenu, true));
     this.editorServer = new EditorServer({ publishLock: false });
     try {
       this.editorPort = await this.editorServer.start(this.plugin.vaultRoot);
