@@ -281,18 +281,24 @@ function windowsCommandReferences(tokens: string[], env: NodeJS.ProcessEnv): { e
 	return { env: commandEnv, references };
 }
 
+/**
+ * Ceiling for a single CLI stdout capture. It must stay above the export size limit so that an
+ * oversized session reports ExportTooLargeError instead of a truncated, unparsable payload.
+ */
+const CLI_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
+
 function runExecFile(executable: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<ExecResult> {
 	return new Promise((resolve, reject) => {
 		let file = process.platform === "win32"
 			? findExecutableOnPath(executable, { platform: "win32", environment: opts.env }) ?? executable
 			: executable;
 		let fileArgs = args;
-		let execOptions: Parameters<typeof execFile>[2] = opts;
+		let execOptions: Parameters<typeof execFile>[2] = { ...opts, maxBuffer: CLI_MAX_BUFFER_BYTES };
 		if (process.platform === "win32") {
 			const target = file;
 			file = findExecutableOnPath("node.exe", { platform: "win32", environment: opts.env }) ?? "node.exe";
 			fileArgs = ["-e", WINDOWS_EXEC_HOST_JS, opts.cwd, target, ...args];
-			execOptions = { ...opts, windowsHide: true };
+			execOptions = { ...opts, windowsHide: true, maxBuffer: CLI_MAX_BUFFER_BYTES };
 		}
 
 		execFile(file, fileArgs, execOptions, (err, stdout, stderr) => {

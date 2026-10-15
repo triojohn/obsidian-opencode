@@ -169,6 +169,26 @@ describe('OpencodeClient export with large sessions', () => {
 		);
 	});
 
+	it('exports a session whose payload exceeds the execFile default buffer', async () => {
+		vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+		const text = 'x'.repeat(2 * 1024 * 1024);
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, callback) => {
+			(callback as unknown as (error: null, stdout: string, stderr: string) => void)(null, JSON.stringify({
+				data: {
+					info: { model: { id: 'big-model' }, agent: 'fixture-agent', cost: 0, time: { created: 1, updated: 2 } },
+					messages: [{ id: 'msg_1', type: 'user', time: { created: 1 }, text }],
+				},
+			}), '');
+			return {} as unknown as ChildProcess;
+		});
+
+		const result = await new OpencodeClient('opencode', '/tmp').exportSession('session-big', 'v2');
+
+		expect(result?.messages[0].parts[0]).toMatchObject({ type: 'text', text });
+		const options = vi.mocked(execFile).mock.calls[0][2] as { maxBuffer?: number };
+		expect(options.maxBuffer).toBeGreaterThan(Buffer.byteLength(text, 'utf-8'));
+	});
+
 	it('should return null on non-JSON output', async () => {
 		const mockProcess = createMockProcess();
 

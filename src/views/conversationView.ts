@@ -286,7 +286,8 @@ export class OpencodeConversationView extends ItemView {
 			if (error instanceof ExportTooLargeError) {
 				this.detailContainer.createDiv({ cls: "opencode-warning", text: "Session too large to preview." });
 			} else {
-				this.detailContainer.createDiv({ cls: "opencode-error", text: "Failed to load conversation." });
+				const reason = error instanceof Error ? error.message : String(error);
+				this.detailContainer.createDiv({ cls: "opencode-error", text: `Failed to load conversation: ${reason}` });
 			}
 			return;
 		}

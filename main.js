@@ -22500,17 +22500,18 @@ function windowsCommandReferences(tokens, env) {
   });
   return { env: commandEnv, references };
 }
+var CLI_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 function runExecFile(executable, args, opts) {
   return new Promise((resolve4, reject) => {
     var _a, _b;
     let file = process.platform === "win32" ? (_a = findExecutableOnPath(executable, { platform: "win32", environment: opts.env })) != null ? _a : executable : executable;
     let fileArgs = args;
-    let execOptions = opts;
+    let execOptions = { ...opts, maxBuffer: CLI_MAX_BUFFER_BYTES };
     if (process.platform === "win32") {
       const target = file;
       file = (_b = findExecutableOnPath("node.exe", { platform: "win32", environment: opts.env })) != null ? _b : "node.exe";
       fileArgs = ["-e", WINDOWS_EXEC_HOST_JS, opts.cwd, target, ...args];
-      execOptions = { ...opts, windowsHide: true };
+      execOptions = { ...opts, windowsHide: true, maxBuffer: CLI_MAX_BUFFER_BYTES };
     }
     (0, import_child_process.execFile)(file, fileArgs, execOptions, (err, stdout, stderr) => {
       var _a2, _b2;
@@ -24225,7 +24226,8 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
       if (error instanceof ExportTooLargeError) {
         this.detailContainer.createDiv({ cls: "opencode-warning", text: "Session too large to preview." });
       } else {
-        this.detailContainer.createDiv({ cls: "opencode-error", text: "Failed to load conversation." });
+        const reason = error instanceof Error ? error.message : String(error);
+        this.detailContainer.createDiv({ cls: "opencode-error", text: `Failed to load conversation: ${reason}` });
       }
       return;
     }
