@@ -21995,7 +21995,25 @@ var TerminalKeyRouter = class {
       this.registerWslClipboard(context);
     } else {
       this.registerPasteHandler(context);
+      this.registerCtrlCGuard(context);
     }
+  }
+  // Plain Ctrl+C exits OpenCode (`app_exit`). On hosts without the Windows
+  // clipboard bridge nothing intercepts it, so swallow it while the terminal
+  // has focus and copy the selection instead. The WSL bridge keeps owning
+  // Ctrl+C on its own path.
+  registerCtrlCGuard(context) {
+    const { terminal, container } = context;
+    const handler = (event) => {
+      if (event.defaultPrevented || event.isComposing || isImeKey(event)) return;
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== "c") return;
+      if (terminal.hasSelection()) copySelectionToSystemClipboard(terminal);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    container.addEventListener("keydown", handler, true);
+    this.disposers.push(() => container.removeEventListener("keydown", handler, true));
   }
   registerSuspendGuard(context) {
     const handler = (event) => {
@@ -22201,6 +22219,17 @@ var TerminalKeyRouter = class {
 };
 function isImeKey(event) {
   return Reflect.get(event, "keyCode") === 229;
+}
+function copySelectionToSystemClipboard(terminal) {
+  const reportFailure = (error) => console.warn(`[obsidian-opencode] Failed to copy the terminal selection: ${String(error)}`);
+  const selection = terminal.getSelection();
+  try {
+    void navigator.clipboard.writeText(selection).then(() => {
+      if (terminal.getSelection() === selection) terminal.clearSelection();
+    }, reportFailure);
+  } catch (error) {
+    reportFailure(error);
+  }
 }
 
 // src/modules/windowsTerminalMouse.ts

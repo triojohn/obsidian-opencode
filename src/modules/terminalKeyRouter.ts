@@ -41,7 +41,27 @@ export class TerminalKeyRouter {
 			this.registerWslClipboard(context);
 		} else {
 			this.registerPasteHandler(context);
+			this.registerCtrlCGuard(context);
 		}
+	}
+
+	// Plain Ctrl+C exits OpenCode (`app_exit`). On hosts without the Windows
+	// clipboard bridge nothing intercepts it, so swallow it while the terminal
+	// has focus and copy the selection instead. The WSL bridge keeps owning
+	// Ctrl+C on its own path.
+	private registerCtrlCGuard(context: KeyRouterContext): void {
+		const { terminal, container } = context;
+		const handler = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.isComposing || isImeKey(event)) return;
+			if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+			if (event.key.toLowerCase() !== "c") return;
+
+			if (terminal.hasSelection()) copySelectionToSystemClipboard(terminal);
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		};
+		container.addEventListener("keydown", handler, true);
+		this.disposers.push(() => container.removeEventListener("keydown", handler, true));
 	}
 
 	private registerSuspendGuard(context: KeyRouterContext): void {
@@ -269,4 +289,19 @@ export class TerminalKeyRouter {
 // compatibility check isolated instead of using deprecated keyCode for keys.
 function isImeKey(event: KeyboardEvent): boolean {
 	return Reflect.get(event, "keyCode") === 229;
+}
+
+// Same contract as the WSL bridge: keep the selection when the write fails so
+// the user can still copy it. Only the failure report differs (console here).
+function copySelectionToSystemClipboard(terminal: Terminal): void {
+	const reportFailure = (error: unknown) =>
+		console.warn(`[obsidian-opencode] Failed to copy the terminal selection: ${String(error)}`);
+	const selection = terminal.getSelection();
+	try {
+		void navigator.clipboard.writeText(selection).then(() => {
+			if (terminal.getSelection() === selection) terminal.clearSelection();
+		}, reportFailure);
+	} catch (error) {
+		reportFailure(error);
+	}
 }

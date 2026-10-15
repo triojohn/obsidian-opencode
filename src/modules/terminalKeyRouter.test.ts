@@ -507,4 +507,56 @@ describe("TerminalKeyRouter", () => {
 		expect(clipboard.writeText).toHaveBeenCalledWith(text);
 		context.router.dispose();
 	});
+
+	it("swallows plain Ctrl+C so it cannot exit the session", () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+			const event = context.dispatchKeydown({ key: "c", ctrlKey: true });
+
+			expect(event.preventDefault).toHaveBeenCalledOnce();
+			expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+			expect(writeText).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("copies the terminal selection on Ctrl+C instead of sending the interrupt", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+			context.setSelection("selected text");
+
+			const event = context.dispatchKeydown({ key: "c", ctrlKey: true });
+			await vi.waitFor(() => expect(context.terminalClearSelection).toHaveBeenCalledOnce());
+
+			expect(writeText).toHaveBeenCalledWith("selected text");
+			expect(event.preventDefault).toHaveBeenCalledOnce();
+			expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("leaves Ctrl+Shift+C and Ctrl+V to OpenCode", () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", { clipboard: { writeText } });
+		try {
+			const context = registerRouter();
+
+			const ctrlShiftC = context.dispatchKeydown({ key: "C", ctrlKey: true, shiftKey: true });
+			const ctrlV = context.dispatchKeydown({ key: "v", ctrlKey: true });
+
+			expect(ctrlShiftC.preventDefault).not.toHaveBeenCalled();
+			expect(ctrlShiftC.stopImmediatePropagation).not.toHaveBeenCalled();
+			expect(ctrlV.preventDefault).not.toHaveBeenCalled();
+			expect(ctrlV.stopImmediatePropagation).not.toHaveBeenCalled();
+			expect(writeText).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 });
