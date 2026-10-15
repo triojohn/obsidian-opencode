@@ -932,6 +932,66 @@ describe('OpencodeClient compatibility', () => {
 	});
 });
 
+describe('OpencodeClient getSessionInfo', () => {
+	const mockSpawn = vi.mocked(spawn);
+	const mockExecFile = vi.mocked(execFile);
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('reads session info from the session endpoint on v2', async () => {
+		vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+		mockExecFile.mockImplementation((_cmd, _args, _opts, callback) => {
+			(callback as unknown as (error: null, stdout: string, stderr: string) => void)(null, JSON.stringify({
+				data: {
+					id: 'ses_v2',
+					model: { id: 'fixture-model', providerID: 'fixture-provider' },
+					agent: 'fixture-agent',
+					cost: 0.25,
+					tokens: { input: 10, output: 20, reasoning: 0 },
+				},
+			}), '');
+			return {} as unknown as ChildProcess;
+		});
+
+		const info = await new OpencodeClient('opencode', '/tmp').getSessionInfo('ses_v2', 'v2');
+
+		expect(mockExecFile).toHaveBeenCalledWith(
+			'opencode',
+			['api', 'get', '/api/session/ses_v2'],
+			expect.objectContaining({ cwd: '/tmp' }),
+			expect.any(Function),
+		);
+		expect(info).toMatchObject({ agent: 'fixture-agent', cost: 0.25, model: { id: 'fixture-model' } });
+	});
+
+	it('falls back to the full export on the stable CLI', async () => {
+		let closeHandler: ((code: number) => void) | undefined;
+		const process = {
+			stderr: { on: vi.fn() },
+			on: vi.fn((event: string, handler: (code: number) => void) => {
+				if (event === 'close') closeHandler = handler;
+			}),
+		};
+		mockSpawn.mockReturnValue(process as unknown as ChildProcess);
+		vi.mocked(fs.statSync).mockReturnValue({ size: 1000 } as unknown as fs.Stats);
+		vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+			info: { id: 'session-1', agent: 'stable-agent', cost: 1, tokens: { input: 1, output: 2, reasoning: 0 } },
+			messages: [],
+		}));
+
+		const promise = new OpencodeClient('opencode', '/tmp').getSessionInfo('session-1');
+		closeHandler?.(0);
+
+		await expect(promise).resolves.toMatchObject({ agent: 'stable-agent', cost: 1 });
+	});
+});
+
 describe('OpencodeClient deleteSession', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();

@@ -22808,6 +22808,39 @@ ${result.stderr}`;
       throw new MalformedCliOutputError(error);
     }
   }
+  /**
+   * Fetch the session metadata (model, agent, tokens, cost).
+   *
+   * Args:
+   *     sessionId: OpenCode session id (`ses_…`).
+   *     generation: Detected CLI generation; `stable` has no HTTP API and
+   *         falls back to the full session export.
+   *
+   * Returns:
+   *     The session info object.
+   *
+   * Raises:
+   *     CliCommandError: When the stable export fails.
+   *     MalformedCliOutputError: When the v2 response is malformed.
+   */
+  async getSessionInfo(sessionId, generation = "stable") {
+    if (generation === "stable") {
+      const data = await this.exportSession(sessionId, generation);
+      if (!data) throw new CliCommandError(`Failed to load session info: ${sessionId}`);
+      return data.info;
+    }
+    if (!SAFE_ID_RE.test(sessionId)) throw new Error(`Invalid session ID: ${sessionId}`);
+    try {
+      const raw = await this.commandRunner()(["api", "get", `/api/session/${sessionId}`]);
+      const payload = JSON.parse(raw);
+      const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+      if (!isRecord(data)) throw new Error("Expected an OpenCode v2 session response");
+      return data;
+    } catch (error) {
+      if (error instanceof OpencodeError) throw error;
+      throw new MalformedCliOutputError(error);
+    }
+  }
   async resolveProjectId(run) {
     if (this.projectId) return this.projectId;
     const payload = JSON.parse(await run(["api", "get", "/api/project"]));
@@ -23978,6 +24011,7 @@ function sessionListErrorMessage(error) {
 var moment2 = import_obsidian6.moment;
 var SESSION_PAGE_LIMIT = 20;
 var SESSION_SCROLL_THRESHOLD = 200;
+var RECENT_MESSAGE_COUNT = 8;
 var OPENCODE_CONVERSATION_VIEW_TYPE = "opencode-conversations";
 var OpencodeConversationView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
@@ -24218,9 +24252,9 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
       }).open();
     });
     this.detailContainer.createDiv({ cls: "opencode-loading", text: "Loading conversation..." });
-    let data;
+    let infoData;
     try {
-      data = await this.createClient().exportSession(session.id, this.cliGeneration);
+      infoData = await this.createClient().getSessionInfo(session.id, this.cliGeneration);
     } catch (error) {
       (_a = this.detailContainer.querySelector(".opencode-loading")) == null ? void 0 : _a.remove();
       if (error instanceof ExportTooLargeError) {
@@ -24232,17 +24266,13 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
       return;
     }
     (_b = this.detailContainer.querySelector(".opencode-loading")) == null ? void 0 : _b.remove();
-    if (!data) {
-      this.detailContainer.createDiv({ cls: "opencode-error", text: "Failed to load conversation." });
-      return;
-    }
     const info = this.detailContainer.createDiv({ cls: "opencode-session-info" });
-    info.createDiv({ text: `Model: ${((_c = data.info.model) == null ? void 0 : _c.id) || "unknown"}` });
-    info.createDiv({ text: `Agent: ${data.info.agent || "default"}` });
-    info.createDiv({ text: `Tokens: ${((_d = data.info.tokens) == null ? void 0 : _d.input) || 0} in / ${((_e = data.info.tokens) == null ? void 0 : _e.output) || 0} out` });
-    info.createDiv({ text: `Cost: $${(data.info.cost || 0).toFixed(4)}` });
+    info.createDiv({ text: `Model: ${((_c = infoData.model) == null ? void 0 : _c.id) || "unknown"}` });
+    info.createDiv({ text: `Agent: ${infoData.agent || "default"}` });
+    info.createDiv({ text: `Tokens: ${((_d = infoData.tokens) == null ? void 0 : _d.input) || 0} in / ${((_e = infoData.tokens) == null ? void 0 : _e.output) || 0} out` });
+    info.createDiv({ text: `Cost: $${(infoData.cost || 0).toFixed(4)}` });
     try {
-      const messages = await this.createClient().listSessionMessages(session.id);
+      const messages = await this.createClient().listSessionMessages(session.id, RECENT_MESSAGE_COUNT);
       this.renderRecentMessages(messages);
     } catch (error) {
       console.error("Failed to load session messages", error);
@@ -24253,7 +24283,7 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     if (!this.detailContainer) return;
     const container = this.detailContainer.createDiv({ cls: "opencode-session-messages" });
     container.createDiv({ cls: "opencode-session-messages-title", text: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F" });
-    const recent = messages.slice(-8);
+    const recent = messages.slice(-RECENT_MESSAGE_COUNT);
     if (recent.length === 0) {
       container.createDiv({ cls: "opencode-session-messages-empty", text: "\u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439" });
       return;

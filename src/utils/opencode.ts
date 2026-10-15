@@ -74,6 +74,8 @@ export interface OpencodeExport {
 	messages: OpencodeMessage[];
 }
 
+export type OpencodeSessionInfo = OpencodeExport["info"];
+
 /** One session message normalized from the OpenCode v2 HTTP API. */
 export interface OpencodeSessionMessage {
 	role: string;
@@ -655,6 +657,43 @@ export class OpencodeClient {
 			const query = `/api/session/${sessionId}/message?limit=${limit}&order=desc`;
 			const messages = parseV2Messages(await run(["api", "get", query]));
 			return messages.reverse();
+		} catch (error) {
+			if (error instanceof OpencodeError) throw error;
+			throw new MalformedCliOutputError(error);
+		}
+	}
+
+	/**
+	 * Fetch the session metadata (model, agent, tokens, cost).
+	 *
+	 * Args:
+	 *     sessionId: OpenCode session id (`ses_…`).
+	 *     generation: Detected CLI generation; `stable` has no HTTP API and
+	 *         falls back to the full session export.
+	 *
+	 * Returns:
+	 *     The session info object.
+	 *
+	 * Raises:
+	 *     CliCommandError: When the stable export fails.
+	 *     MalformedCliOutputError: When the v2 response is malformed.
+	 */
+	async getSessionInfo(
+		sessionId: string,
+		generation: OpenCodeCliGeneration = "stable"
+	): Promise<OpencodeSessionInfo> {
+		if (generation === "stable") {
+			const data = await this.exportSession(sessionId, generation);
+			if (!data) throw new CliCommandError(`Failed to load session info: ${sessionId}`);
+			return data.info;
+		}
+		if (!SAFE_ID_RE.test(sessionId)) throw new Error(`Invalid session ID: ${sessionId}`);
+		try {
+			const raw = await this.commandRunner()(["api", "get", `/api/session/${sessionId}`]);
+			const payload: unknown = JSON.parse(raw);
+			const data = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+			if (!isRecord(data)) throw new Error("Expected an OpenCode v2 session response");
+			return data as unknown as OpencodeSessionInfo;
 		} catch (error) {
 			if (error instanceof OpencodeError) throw error;
 			throw new MalformedCliOutputError(error);

@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Notice, moment as obsidianMoment, Modal, App } from "obsidian";
 import type OpencodePlugin from "../main";
-import { OpencodeClient, OpencodeSession, OpencodeExport, OpencodeSessionMessage, ExportTooLargeError } from "../utils/opencode";
+import { OpencodeClient, OpencodeSession, OpencodeSessionInfo, OpencodeSessionMessage, ExportTooLargeError } from "../utils/opencode";
 import { SessionExporter } from "../modules/sessionExporter";
 import { sessionListErrorMessage } from "./conversationErrors";
 import { OpenCodeCliGeneration } from "../utils/opencodeExecutable";
@@ -10,6 +10,8 @@ const moment: (input: number) => { format: (fmt: string) => string; fromNow: () 
 
 const SESSION_PAGE_LIMIT = 20;
 const SESSION_SCROLL_THRESHOLD = 200;
+/** Number of newest messages the details panel renders. */
+const RECENT_MESSAGE_COUNT = 8;
 
 export const OPENCODE_CONVERSATION_VIEW_TYPE = "opencode-conversations";
 
@@ -278,9 +280,9 @@ export class OpencodeConversationView extends ItemView {
 
 		this.detailContainer.createDiv({ cls: "opencode-loading", text: "Loading conversation..." });
 
-		let data: OpencodeExport | null;
+		let infoData: OpencodeSessionInfo;
 		try {
-			data = await this.createClient().exportSession(session.id, this.cliGeneration);
+			infoData = await this.createClient().getSessionInfo(session.id, this.cliGeneration);
 		} catch (error) {
 			this.detailContainer.querySelector(".opencode-loading")?.remove();
 			if (error instanceof ExportTooLargeError) {
@@ -293,19 +295,14 @@ export class OpencodeConversationView extends ItemView {
 		}
 		this.detailContainer.querySelector(".opencode-loading")?.remove();
 
-		if (!data) {
-			this.detailContainer.createDiv({ cls: "opencode-error", text: "Failed to load conversation." });
-			return;
-		}
-
 		const info = this.detailContainer.createDiv({ cls: "opencode-session-info" });
-		info.createDiv({ text: `Model: ${data.info.model?.id || "unknown"}` });
-		info.createDiv({ text: `Agent: ${data.info.agent || "default"}` });
-		info.createDiv({ text: `Tokens: ${data.info.tokens?.input || 0} in / ${data.info.tokens?.output || 0} out` });
-		info.createDiv({ text: `Cost: $${(data.info.cost || 0).toFixed(4)}` });
+		info.createDiv({ text: `Model: ${infoData.model?.id || "unknown"}` });
+		info.createDiv({ text: `Agent: ${infoData.agent || "default"}` });
+		info.createDiv({ text: `Tokens: ${infoData.tokens?.input || 0} in / ${infoData.tokens?.output || 0} out` });
+		info.createDiv({ text: `Cost: $${(infoData.cost || 0).toFixed(4)}` });
 
 		try {
-			const messages = await this.createClient().listSessionMessages(session.id);
+			const messages = await this.createClient().listSessionMessages(session.id, RECENT_MESSAGE_COUNT);
 			this.renderRecentMessages(messages);
 		} catch (error) {
 			console.error("Failed to load session messages", error);
@@ -317,7 +314,7 @@ export class OpencodeConversationView extends ItemView {
 		if (!this.detailContainer) return;
 		const container = this.detailContainer.createDiv({ cls: "opencode-session-messages" });
 		container.createDiv({ cls: "opencode-session-messages-title", text: "Последние сообщения" });
-		const recent = messages.slice(-8);
+		const recent = messages.slice(-RECENT_MESSAGE_COUNT);
 		if (recent.length === 0) {
 			container.createDiv({ cls: "opencode-session-messages-empty", text: "нет сообщений" });
 			return;
