@@ -23808,7 +23808,7 @@ ${message}\r
     const attachPath = this.plugin.pendingAttachPath;
     this.plugin.pendingAttachPath = null;
     if (attachPath) {
-      this.ptySession.onFirstOutput(() => {
+      this.ptySession.onTuiReady(() => {
         if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
         terminal.input(`@${attachPath}`, true);
       });
@@ -24540,6 +24540,9 @@ var FLATPAK_OVERRIDE_COMMAND = "flatpak override --user --talk-name=org.freedesk
 var WINDOWS_CONPTY_PROBE_ARTIFACT = "+q4d73Gi=31337,s=1,v=1,a=q,t=d,f=24;AAAA";
 var WINDOWS_CONPTY_XTGETTCAP_ARTIFACT = "+q4d73";
 var WINDOWS_TUI_TEARDOWN_SEQUENCES = ["\x1B[?2004l", "\x1B[?2031l"];
+var TUI_ALTERNATE_SCREEN_SEQUENCE = "\x1B[?1049h";
+var TUI_INPUT_READY_DELAY_MS = 2500;
+var TUI_INPUT_READY_FALLBACK_MS = 8e3;
 function stripWindowsConPtyProbeArtifact(output) {
   return output.split(WINDOWS_CONPTY_PROBE_ARTIFACT).join("").split(WINDOWS_CONPTY_XTGETTCAP_ARTIFACT).join("");
 }
@@ -24840,9 +24843,12 @@ var PtySession = class {
     this.windowsInterruptPending = false;
     this.windowsInterruptResetTimer = null;
     this.windowsGracefulExitRequested = false;
-    /** True once the child PTY has produced its first output. */
-    this.ready = false;
-    this.readyCallbacks = [];
+    /** True once the TUI is warm enough to accept injected input. */
+    this.tuiReady = false;
+    this.tuiReadyCallbacks = [];
+    this.tuiReadyTimer = null;
+    /** True once the alternate-screen sequence was seen (the short timer is armed). */
+    this.tuiReadyScheduled = false;
   }
   /**
    * Resolves the vendored node-pty entry point inside this plugin.
@@ -24875,8 +24881,13 @@ var PtySession = class {
   spawn(terminal, options) {
     var _a, _b, _c, _d, _e, _f, _g;
     this.windowsGracefulExitRequested = false;
-    this.ready = false;
-    this.readyCallbacks = [];
+    this.tuiReady = false;
+    this.tuiReadyCallbacks = [];
+    this.tuiReadyScheduled = false;
+    if (this.tuiReadyTimer !== null) {
+      window.clearTimeout(this.tuiReadyTimer);
+      this.tuiReadyTimer = null;
+    }
     if (process.platform === "win32") {
       const windowsBuild = Number(os6.release().split(".")[2]);
       if (Number.isFinite(windowsBuild) && windowsBuild > 0 && windowsBuild < 17763) {
@@ -25009,9 +25020,10 @@ Unable to start the OpenCode Windows PTY: ${message}\r
       });
     }
     this.ptyProcess = ptyProcess;
+    this.tuiReadyTimer = window.setTimeout(() => this.markTuiReady(), TUI_INPUT_READY_FALLBACK_MS);
     (_f = ptyProcess.stdout) == null ? void 0 : _f.on("data", (chunk) => {
-      if (this.ptyProcess === ptyProcess) this.markReady();
       const str = chunk.toString();
+      this.armTuiReadyTimer(str);
       if (str.includes("org.freedesktop.DBus.Error.ServiceUnknown")) {
         new import_obsidian9.Notice(`Additional sandbox permissions are required. Run '${FLATPAK_OVERRIDE_COMMAND}' on your host system to allow command execution.`, 15e3);
       }
@@ -25117,28 +25129,45 @@ Error: ${err.message}\r
     return (_b = (_a = this.ptyProcess) == null ? void 0 : _a.stdin) != null ? _b : null;
   }
   /**
-   * Runs `callback` once the child has produced its first output, i.e. the
-   * moment input written to the PTY stops being buffered by the host.
+   * Runs `callback` once the TUI is warm enough to accept injected input.
    *
-   * A fixed delay cannot be used for this: under ConPTY the child needs
-   * several seconds to start, so any timer either fires too early (input
-   * dropped) or slows every open down.
+   * A child-process liveness check is not enough: on Windows ConPTY the first
+   * stdout chunk is ConPTY housekeeping, and the app keeps initialising for
+   * seconds after it enters the alternate screen, discarding anything written
+   * to the PTY in the meantime. A fixed timer is not enough either, so the
+   * delay is anchored on the TUI's alternate-screen sequence.
    *
    * Args:
-   *   callback: Invoked once, immediately if the child already produced output.
+   *   callback: Invoked once, immediately if the TUI is already ready.
    */
-  onFirstOutput(callback) {
-    if (this.ready) {
+  onTuiReady(callback) {
+    if (this.tuiReady) {
       callback();
       return;
     }
-    this.readyCallbacks.push(callback);
+    this.tuiReadyCallbacks.push(callback);
   }
-  markReady() {
-    if (this.ready) return;
-    this.ready = true;
-    const callbacks = this.readyCallbacks;
-    this.readyCallbacks = [];
+  /**
+   * Re-arms the readiness timer on the TUI's alternate-screen sequence.
+   *
+   * Args:
+   *   output: Raw stdout chunk from the PTY child.
+   */
+  armTuiReadyTimer(output) {
+    if (this.tuiReadyScheduled || !output.includes(TUI_ALTERNATE_SCREEN_SEQUENCE)) return;
+    this.tuiReadyScheduled = true;
+    if (this.tuiReadyTimer !== null) window.clearTimeout(this.tuiReadyTimer);
+    this.tuiReadyTimer = window.setTimeout(() => this.markTuiReady(), TUI_INPUT_READY_DELAY_MS);
+  }
+  markTuiReady() {
+    if (this.tuiReady) return;
+    this.tuiReady = true;
+    if (this.tuiReadyTimer !== null) {
+      window.clearTimeout(this.tuiReadyTimer);
+      this.tuiReadyTimer = null;
+    }
+    const callbacks = this.tuiReadyCallbacks;
+    this.tuiReadyCallbacks = [];
     for (const callback of callbacks) callback();
   }
   writeStdin(data) {

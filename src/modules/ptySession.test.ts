@@ -101,26 +101,35 @@ describe("PtySession", () => {
 		}
 	});
 
-	it("invokes first-output callbacks once the child produces output", () => {
+	it("invokes TUI-ready callbacks once the TUI has entered the alternate screen and warmed up", () => {
 		const platform = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 		const child = createProcess();
 		vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
 		const terminal = { rows: 24, cols: 80, write: vi.fn(), writeln: vi.fn() };
+		vi.useFakeTimers();
 
 		try {
 			const session = new PtySession();
 			session.spawn(terminal as unknown as Terminal, { opencodePath: "opencode", cwd: "/tmp", args: [] });
 
 			const fired: string[] = [];
-			session.onFirstOutput(() => fired.push("queued"));
-			expect(fired).toEqual([]);
+			session.onTuiReady(() => fired.push("queued"));
 
 			child.stdout.emit("data", Buffer.from("hello"));
+			vi.advanceTimersByTime(1000);
+			expect(fired).toEqual([]);
+
+			child.stdout.emit("data", Buffer.from("\x1b[?1049h\x1b[?2004h"));
+			vi.advanceTimersByTime(1000);
+			expect(fired).toEqual([]);
+
+			vi.advanceTimersByTime(3000);
 			expect(fired).toEqual(["queued"]);
 
-			session.onFirstOutput(() => fired.push("late"));
+			session.onTuiReady(() => fired.push("late"));
 			expect(fired).toEqual(["queued", "late"]);
 		} finally {
+			vi.useRealTimers();
 			platform.mockRestore();
 		}
 	});

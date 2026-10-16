@@ -773,13 +773,15 @@ export class OpencodeTerminalView extends ItemView {
 		});
 
 		// Pre-fill the active note as an @mention, on every open. Waits for the
-		// child's first output instead of a fixed delay: ConPTY takes seconds to
-		// start, so a timer is unreliable. No Enter: the mention menu stays open
-		// for the user to confirm. Existing composer text is left untouched.
+		// TUI to be ready instead of a fixed delay: ConPTY takes seconds to
+		// start and the app discards input while it initialises, so a timer is
+		// unreliable, and the child's first byte is ConPTY housekeeping, not the
+		// TUI. No Enter: the mention menu stays open for the user to confirm.
+		// Existing composer text is left untouched.
 		const attachPath = this.plugin.pendingAttachPath;
 		this.plugin.pendingAttachPath = null;
 		if (attachPath) {
-			this.ptySession.onFirstOutput(() => {
+			this.ptySession.onTuiReady(() => {
 				if (this.closing || this.terminal !== terminal || !this.ptySession.getStdin()) return;
 				terminal.input(`@${attachPath}`, true);
 			});
