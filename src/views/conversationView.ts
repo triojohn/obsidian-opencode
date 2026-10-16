@@ -5,6 +5,7 @@ import { SessionExporter } from "../modules/sessionExporter";
 import { sessionListErrorMessage } from "./conversationErrors";
 import { OpenCodeCliGeneration } from "../utils/opencodeExecutable";
 import { normalizeVaultPath } from "../utils/path";
+import { sessionUri } from "../modules/sessionUri";
 
 const moment: (input: number) => { format: (fmt: string) => string; fromNow: () => string } = obsidianMoment;
 
@@ -259,6 +260,13 @@ export class OpencodeConversationView extends ItemView {
 		const restoreBtn = actions.createEl("button", { text: "Restore in terminal", cls: "mod-cta" });
 		restoreBtn.addEventListener("click", () => {
 			void this.plugin.openTerminalWithSession(session.id, session.directory);
+		});
+
+		const copyLinkBtn = actions.createEl("button", { text: "Copy link" });
+		copyLinkBtn.addEventListener("click", () => {
+			void navigator.clipboard.writeText(sessionUri(session.id, session.directory))
+				.then(() => new Notice("Session link copied"))
+				.catch((error) => console.debug("Unable to copy session link", error));
 		});
 
 		const exportBtn = actions.createEl("button", { text: "Export to note" });

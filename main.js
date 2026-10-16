@@ -23851,6 +23851,15 @@ var import_obsidian6 = require("obsidian");
 
 // src/modules/sessionExporter.ts
 var import_obsidian5 = require("obsidian");
+
+// src/modules/sessionUri.ts
+function sessionUri(sessionId, directory) {
+  let uri = `obsidian://opencode?session=${encodeURIComponent(sessionId)}`;
+  if (directory) uri += `&directory=${encodeURIComponent(directory)}`;
+  return uri;
+}
+
+// src/modules/sessionExporter.ts
 var moment = import_obsidian5.moment;
 var TRANSLITERATION = {
   \u0430: "a",
@@ -23959,6 +23968,9 @@ var SessionExporter = class {
 
 `;
     content += `# ${session.title}
+
+`;
+    content += `[OpenCode: ${session.title}](${sessionUri(session.id, session.directory)})
 
 `;
     for (const msg of data.messages) {
@@ -24234,6 +24246,10 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     const restoreBtn = actions.createEl("button", { text: "Restore in terminal", cls: "mod-cta" });
     restoreBtn.addEventListener("click", () => {
       void this.plugin.openTerminalWithSession(session.id, session.directory);
+    });
+    const copyLinkBtn = actions.createEl("button", { text: "Copy link" });
+    copyLinkBtn.addEventListener("click", () => {
+      void navigator.clipboard.writeText(sessionUri(session.id, session.directory)).then(() => new import_obsidian6.Notice("Session link copied")).catch((error) => console.debug("Unable to copy session link", error));
     });
     const exportBtn = actions.createEl("button", { text: "Export to note" });
     exportBtn.addEventListener("click", () => {
@@ -25509,6 +25525,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       OPENCODE_CONVERSATION_VIEW_TYPE,
       (leaf) => new OpencodeConversationView(leaf, this)
     );
+    this.registerObsidianProtocolHandler("opencode", (params) => {
+      void this.openSessionFromUri(params);
+    });
     (0, import_obsidian10.addIcon)(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
     this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt) => {
       void this.openActiveNoteTerminal();
@@ -25740,6 +25759,44 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   async openTerminalWithSession(sessionId, directory) {
     this.sessionState.setOpenSession(sessionId, directory);
     await this.openOrRestartTerminal();
+  }
+  /**
+   * Handle an `obsidian://opencode?session=<id>[&directory=<dir>]` link.
+   *
+   * The directory from the link wins; otherwise it is resolved from the
+   * session list. A session that cannot be located is not opened.
+   */
+  async openSessionFromUri(params) {
+    var _a, _b;
+    const sessionId = (_a = params.session) == null ? void 0 : _a.trim();
+    if (!sessionId) {
+      new import_obsidian10.Notice("OpenCode: session id missing in link");
+      return;
+    }
+    const directory = ((_b = params.directory) == null ? void 0 : _b.trim()) || await this.resolveSessionDirectory(sessionId);
+    if (!directory) {
+      new import_obsidian10.Notice(`OpenCode session not found: ${sessionId}`);
+      return;
+    }
+    await this.openTerminalWithSession(sessionId, directory);
+  }
+  /** Look up a session's working directory, or null when it is unknown. */
+  async resolveSessionDirectory(sessionId) {
+    var _a, _b;
+    const cwd = this.settings.defaultWorkingDirectory || this.vaultRoot;
+    try {
+      const client = new OpencodeClient(
+        this.settings.opencodePath || "opencode",
+        cwd,
+        this.settings.environmentVariables
+      );
+      const compatibility = await client.checkCompatibility();
+      const sessions = await client.listSessions(compatibility.generation);
+      return (_b = (_a = sessions.find((session) => session.id === sessionId)) == null ? void 0 : _a.directory) != null ? _b : null;
+    } catch (error) {
+      console.debug("Unable to resolve OpenCode session directory", error);
+      return null;
+    }
   }
   /**
    * Open the terminal rooted at the active note's folder.

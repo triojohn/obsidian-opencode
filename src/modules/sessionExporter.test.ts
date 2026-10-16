@@ -105,6 +105,18 @@ describe('SessionExporter', () => {
 		expect(content).toContain('opencode-session-id: session-123');
 	});
 
+	it('links the note back to the session', async () => {
+		const app = createMockApp();
+		const exporter = new SessionExporter(app as unknown as App);
+
+		await exporter.exportToNote(createSession(), createData());
+
+		const content = app.vault.create.mock.calls[0][1] as string;
+		expect(content).toContain(
+			'[OpenCode: Test Session](obsidian://opencode?session=session-123&directory=%2Fhome%2Fuser%2Fproject)',
+		);
+	});
+
 	it('transliterates a Cyrillic title into the file name', async () => {
 		const app = createMockApp();
 		const exporter = new SessionExporter(app as unknown as App);

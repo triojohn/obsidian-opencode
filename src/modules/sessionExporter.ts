@@ -1,5 +1,6 @@
 import { App, TFile, Notice, moment as obsidianMoment } from "obsidian";
 import { OpencodeSession, OpencodeExport } from "../utils/opencode";
+import { sessionUri } from "./sessionUri";
 
 const moment: (input: number) => { format: (fmt: string) => string } = obsidianMoment;
 
@@ -86,6 +87,7 @@ export class SessionExporter {
 		content += `opencode-updated: ${moment(data.info.time.updated).format("YYYY-MM-DD HH:mm:ss")}\n`;
 		content += `---\n\n`;
 		content += `# ${session.title}\n\n`;
+		content += `[OpenCode: ${session.title}](${sessionUri(session.id, session.directory)})\n\n`;
 
 		for (const msg of data.messages) {
 			const role = msg.info.role === "assistant" ? "Assistant" : "User";

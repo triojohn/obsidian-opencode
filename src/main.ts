@@ -111,6 +111,10 @@ export default class OpencodePlugin extends Plugin {
 			(leaf) => new OpencodeConversationView(leaf, this)
 		);
 
+		this.registerObsidianProtocolHandler("opencode", (params) => {
+			void this.openSessionFromUri(params);
+		});
+
 		addIcon(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
 		this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt: MouseEvent) => {
 			void this.openActiveNoteTerminal();
@@ -360,6 +364,44 @@ export default class OpencodePlugin extends Plugin {
 	async openTerminalWithSession(sessionId: string, directory: string) {
 		this.sessionState.setOpenSession(sessionId, directory);
 		await this.openOrRestartTerminal();
+	}
+
+	/**
+	 * Handle an `obsidian://opencode?session=<id>[&directory=<dir>]` link.
+	 *
+	 * The directory from the link wins; otherwise it is resolved from the
+	 * session list. A session that cannot be located is not opened.
+	 */
+	private async openSessionFromUri(params: Record<string, string>): Promise<void> {
+		const sessionId = params.session?.trim();
+		if (!sessionId) {
+			new Notice("OpenCode: session id missing in link");
+			return;
+		}
+		const directory = params.directory?.trim() || await this.resolveSessionDirectory(sessionId);
+		if (!directory) {
+			new Notice(`OpenCode session not found: ${sessionId}`);
+			return;
+		}
+		await this.openTerminalWithSession(sessionId, directory);
+	}
+
+	/** Look up a session's working directory, or null when it is unknown. */
+	private async resolveSessionDirectory(sessionId: string): Promise<string | null> {
+		const cwd = this.settings.defaultWorkingDirectory || this.vaultRoot;
+		try {
+			const client = new OpencodeClient(
+				this.settings.opencodePath || "opencode",
+				cwd,
+				this.settings.environmentVariables,
+			);
+			const compatibility = await client.checkCompatibility();
+			const sessions = await client.listSessions(compatibility.generation);
+			return sessions.find((session) => session.id === sessionId)?.directory ?? null;
+		} catch (error) {
+			console.debug("Unable to resolve OpenCode session directory", error);
+			return null;
+		}
 	}
 
 	/**
