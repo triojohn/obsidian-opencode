@@ -24456,7 +24456,7 @@ var ViewCoordinator = class {
   async activateTerminalView() {
     let leaf = this.workspace.getLeavesOfType(this.config.terminalViewType)[0];
     if (!leaf) {
-      const rightLeaf = this.workspace.getRightLeaf(false);
+      const rightLeaf = this.ensureRightLeaf();
       if (rightLeaf) {
         leaf = rightLeaf;
         await leaf.setViewState({ type: this.config.terminalViewType, active: true });
@@ -24468,7 +24468,7 @@ var ViewCoordinator = class {
   async activateConversationView() {
     let leaf = this.workspace.getLeavesOfType(this.config.conversationViewType)[0];
     if (!leaf) {
-      const rightLeaf = this.workspace.getRightLeaf(false);
+      const rightLeaf = this.ensureRightLeaf();
       if (rightLeaf) {
         leaf = rightLeaf;
         await leaf.setViewState({ type: this.config.conversationViewType, active: true });
@@ -24487,7 +24487,7 @@ var ViewCoordinator = class {
     } else {
       let leaf = this.workspace.getLeavesOfType(this.config.terminalViewType)[0];
       if (!leaf) {
-        const newLeaf = this.workspace.getRightLeaf(false);
+        const newLeaf = this.ensureRightLeaf();
         if (newLeaf) {
           leaf = newLeaf;
           await leaf.setViewState({ type: this.config.terminalViewType, active: true });
@@ -24508,7 +24508,7 @@ var ViewCoordinator = class {
       await restartFn();
       return leaf;
     } else {
-      const rightLeaf = this.workspace.getRightLeaf(false);
+      const rightLeaf = this.ensureRightLeaf();
       if (rightLeaf) {
         await rightLeaf.setViewState({ type: this.config.terminalViewType, active: true });
         await this.revealTerminal(rightLeaf);
@@ -24516,6 +24516,33 @@ var ViewCoordinator = class {
       }
     }
     return null;
+  }
+  /**
+   * Returns a leaf in the right sidebar without splitting its existing group.
+   *
+   * `getRightLeaf(false)` splits the first right-sidebar group whenever it is
+   * already occupied, which left the new view in a fresh column of half the
+   * height. Instead, append a tab to the first group that is already there.
+   */
+  ensureRightLeaf() {
+    var _a, _b;
+    const group = this.getRightSidebarGroup();
+    if (group) {
+      try {
+        const index = (_b = (_a = group.children) == null ? void 0 : _a.length) != null ? _b : 0;
+        return this.workspace.createLeafInParent(group, index);
+      } catch (error) {
+        console.warn("Falling back to a right-sidebar split:", error);
+      }
+    }
+    return this.workspace.getRightLeaf(false);
+  }
+  getRightSidebarGroup() {
+    var _a;
+    const children = (_a = this.workspace.rightSplit) == null ? void 0 : _a.children;
+    const group = children == null ? void 0 : children[0];
+    if (!group) return null;
+    return group;
   }
   async revealTerminal(leaf) {
     var _a, _b, _c;

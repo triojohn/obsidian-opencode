@@ -146,6 +146,24 @@ describe('ViewCoordinator', () => {
 		expect(existingLeaf.view.focusTerminal).toHaveBeenCalledOnce();
 	});
 
+	it('opens a new terminal as a tab in the existing right sidebar group', async () => {
+		const workspace = createMockWorkspace();
+		const group = { children: [{}, {}, {}] };
+		const created = createMockLeaf('created');
+		created.setViewState.mockImplementation((state: { type: string }) => { created.type = state.type; workspace._leaves.push(created); });
+		(workspace.rightSplit as Record<string, unknown>).children = [group];
+		(workspace as unknown as Record<string, unknown>).createLeafInParent = vi.fn(() => created);
+		const coordinator = new ViewCoordinator(workspace as unknown as Workspace, {
+			terminalViewType: 'opencode-terminal', conversationViewType: 'opencode-conversations',
+		});
+
+		await coordinator.activateTerminalView();
+
+		expect((workspace as unknown as { createLeafInParent: ReturnType<typeof vi.fn> }).createLeafInParent)
+			.toHaveBeenCalledWith(group, 3);
+		expect(workspace.getRightLeaf).not.toHaveBeenCalled();
+	});
+
 	it('closes every OpenCode terminal leaf without touching other views', async () => {
 		const firstTerminal = { ...createMockLeaf('terminal-1'), type: 'opencode-terminal' };
 		const secondTerminal = { ...createMockLeaf('terminal-2'), type: 'opencode-terminal' };

@@ -1,4 +1,4 @@
-import { WorkspaceLeaf, Workspace, View } from "obsidian";
+import { WorkspaceLeaf, Workspace, WorkspaceSplit, View } from "obsidian";
 
 export interface ViewCoordinatorConfig {
 	terminalViewType: string;
@@ -18,7 +18,7 @@ export class ViewCoordinator {
 	async activateTerminalView(): Promise<WorkspaceLeaf | null> {
 		let leaf = this.workspace.getLeavesOfType(this.config.terminalViewType)[0];
 		if (!leaf) {
-			const rightLeaf = this.workspace.getRightLeaf(false);
+			const rightLeaf = this.ensureRightLeaf();
 			if (rightLeaf) {
 				leaf = rightLeaf;
 				await leaf.setViewState({ type: this.config.terminalViewType, active: true });
@@ -31,7 +31,7 @@ export class ViewCoordinator {
 	async activateConversationView(): Promise<WorkspaceLeaf | null> {
 		let leaf = this.workspace.getLeavesOfType(this.config.conversationViewType)[0];
 		if (!leaf) {
-			const rightLeaf = this.workspace.getRightLeaf(false);
+			const rightLeaf = this.ensureRightLeaf();
 			if (rightLeaf) {
 				leaf = rightLeaf;
 				await leaf.setViewState({ type: this.config.conversationViewType, active: true });
@@ -53,7 +53,7 @@ export class ViewCoordinator {
 			// Right sidebar is collapsed — ensure leaf exists, then reveal
 			let leaf = this.workspace.getLeavesOfType(this.config.terminalViewType)[0];
 			if (!leaf) {
-				const newLeaf = this.workspace.getRightLeaf(false);
+				const newLeaf = this.ensureRightLeaf();
 				if (newLeaf) {
 					leaf = newLeaf;
 					await leaf.setViewState({ type: this.config.terminalViewType, active: true });
@@ -78,7 +78,7 @@ export class ViewCoordinator {
 			await restartFn();
 			return leaf;
 		} else {
-			const rightLeaf = this.workspace.getRightLeaf(false);
+			const rightLeaf = this.ensureRightLeaf();
 			if (rightLeaf) {
 				await rightLeaf.setViewState({ type: this.config.terminalViewType, active: true });
 				await this.revealTerminal(rightLeaf);
@@ -86,6 +86,35 @@ export class ViewCoordinator {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Returns a leaf in the right sidebar without splitting its existing group.
+	 *
+	 * `getRightLeaf(false)` splits the first right-sidebar group whenever it is
+	 * already occupied, which left the new view in a fresh column of half the
+	 * height. Instead, append a tab to the first group that is already there.
+	 */
+	private ensureRightLeaf(): WorkspaceLeaf | null {
+		const group = this.getRightSidebarGroup();
+		if (group) {
+			try {
+				const index = (group as unknown as { children?: unknown[] }).children?.length ?? 0;
+				return this.workspace.createLeafInParent(group, index);
+			} catch (error) {
+				console.warn("Falling back to a right-sidebar split:", error);
+			}
+		}
+		return this.workspace.getRightLeaf(false);
+	}
+
+	private getRightSidebarGroup(): WorkspaceSplit | null {
+		const children = (this.workspace.rightSplit as unknown as { children?: unknown[] })?.children;
+		const group = children?.[0];
+		if (!group) return null;
+		// Typings declare `WorkspaceParent` as opaque, but every sidebar group
+		// (WorkspaceTabs) carries a `children` array at runtime.
+		return group as WorkspaceSplit;
 	}
 
 	private async revealTerminal(leaf: WorkspaceLeaf): Promise<void> {
