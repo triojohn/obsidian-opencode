@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { renameWithRetry } from "../utils/sessionTabs";
 
 /**
  * Command file watched by the OpenCode TUI plugin.
@@ -21,6 +20,16 @@ export function sameDirectory(a: string, b: string): boolean {
 	return normalizeDirectory(a) === normalizeDirectory(b);
 }
 
+/** True when `directory` is `root` itself or lives somewhere below it. */
+function isInsideProject(directory: string, root: string): boolean {
+	const normalizedDirectory = normalizeDirectory(directory);
+	const normalizedRoot = normalizeDirectory(root);
+	return (
+		normalizedDirectory === normalizedRoot ||
+		normalizedDirectory.startsWith(`${normalizedRoot}${path.sep}`)
+	);
+}
+
 /**
  * Decide whether a session can be switched inside the running TUI.
  *
@@ -28,6 +37,8 @@ export function sameDirectory(a: string, b: string): boolean {
  *   tuiLive: True when the terminal view has a live, input-ready PTY.
  *   currentTuiCwd: Directory the running TUI was spawned in, or null.
  *   directory: Directory the requested session belongs to.
+ *   projectRoot: Vault root; when set, a TUI running elsewhere inside the
+ *     same project can be reused instead of restarted.
  *
  * Returns:
  *   True to send the command file; false to restart the terminal.
@@ -36,8 +47,42 @@ export function shouldSwitchRunningTui(
 	tuiLive: boolean,
 	currentTuiCwd: string | null,
 	directory: string,
+	projectRoot?: string,
 ): boolean {
-	return tuiLive && currentTuiCwd !== null && sameDirectory(currentTuiCwd, directory);
+	if (!tuiLive || currentTuiCwd === null) return false;
+	if (sameDirectory(currentTuiCwd, directory)) return true;
+	if (!projectRoot) return false;
+	return isInsideProject(currentTuiCwd, projectRoot) && isInsideProject(directory, projectRoot);
+}
+
+/**
+ * Overwrite `file` with `temp`, retrying a few times on transient Windows
+ * rename errors (EBUSY/EPERM).
+ *
+ * Returns:
+ *   True when the rename succeeded, false after the last attempt.
+ */
+export function renameWithRetry(temp: string, file: string, attempts = 4): boolean {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			fs.renameSync(temp, file);
+			return true;
+		} catch (error) {
+			if (attempt >= attempts) {
+				console.warn(`Unable to replace ${file}`, error);
+				return false;
+			}
+			sleepSync(attempt * 20);
+		}
+	}
+}
+
+// ponytail: busy-wait; retries are bounded (3×20-60 ms) so blocking the renderer is acceptable.
+function sleepSync(ms: number): void {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		// spin until the backoff window elapses
+	}
 }
 
 /**

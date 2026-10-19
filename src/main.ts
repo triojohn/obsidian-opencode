@@ -15,7 +15,6 @@ import { OpencodeClient } from "./utils/opencode";
 import type { OpencodeSession } from "./utils/opencode";
 import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
-import { mergeSessionTabs } from "./utils/sessionTabs";
 import { resolvePluginDirectory } from "./utils/path";
 import { planTerminalOpen } from "./modules/terminalOpenPlan";
 import { requestNewSession, requestSessionSwitch, shouldSwitchRunningTui } from "./modules/tuiBridge";
@@ -399,7 +398,9 @@ export default class OpencodePlugin extends Plugin {
 	 * command file cannot be written; the caller then restarts the terminal.
 	 */
 	private async switchRunningTui(sessionId: string, directory: string): Promise<boolean> {
-		if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory)) return false;
+		if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory, this.vaultRoot)) {
+			return false;
+		}
 		await this.activateTerminalView();
 		try {
 			await requestSessionSwitch(sessionId);
@@ -477,16 +478,11 @@ export default class OpencodePlugin extends Plugin {
 		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
 		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
 
-		const recentTabs = this.settings.recentTabsCount > 0
-			? sessions
-				.slice(0, this.settings.recentTabsCount)
-				.map((session) => ({ id: session.id, title: session.title }))
-			: null;
-		if (recentTabs) mergeSessionTabs(cwd, recentTabs);
-
 		const plan = planTerminalOpen(attachPath, resumeId);
 		if (plan.kind === "resume" && resumeId) {
-			if (await this.switchRunningTui(resumeId, cwd)) return;
+			// A pre-filled note survives only a restart that runs the prefill
+			// step, so the bridge is used only when nothing has to be attached.
+			if (!plan.attachPath && await this.switchRunningTui(resumeId, cwd)) return;
 			this.sessionState.setOpenSession(resumeId, cwd);
 			this.pendingRouteSessionId = resumeId;
 		} else {
@@ -496,17 +492,6 @@ export default class OpencodePlugin extends Plugin {
 		this.pendingAttachPath = plan.attachPath;
 
 		await this.openOrRestartTerminal();
-
-		if (recentTabs) {
-			// The first write can lose a Windows rename race with the TUI's own
-			// flush; re-merge once the terminal is up so live-reload picks the
-			// tabs up. Skipped if the plugin unloaded or the terminal is gone.
-			this.registerInterval(window.setTimeout(() => {
-				if (this.unloading) return;
-				if (this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE).length === 0) return;
-				mergeSessionTabs(cwd, recentTabs);
-			}, 1_500));
-		}
 	}
 
 	/**

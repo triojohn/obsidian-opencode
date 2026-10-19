@@ -20043,8 +20043,8 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
-var path12 = __toESM(require("node:path"));
-var fs9 = __toESM(require("node:fs"));
+var path11 = __toESM(require("node:path"));
+var fs8 = __toESM(require("node:fs"));
 
 // src/settings.ts
 var DEFAULT_SETTINGS = {
@@ -20056,7 +20056,6 @@ var DEFAULT_SETTINGS = {
   newSessionArgs: "",
   shiftEnterNewline: true,
   resumeWithinDays: 1,
-  recentTabsCount: 5,
   fileSessionFolder: "70-journal/daily-notes"
 };
 
@@ -20203,11 +20202,6 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         control: { type: "slider", key: "resumeWithinDays", min: 0, max: 30, step: 1 }
       },
       {
-        name: "Recent session tabs",
-        desc: "When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.",
-        control: { type: "slider", key: "recentTabsCount", min: 0, max: 20, step: 1 }
-      },
-      {
         name: "Per-file session folder",
         desc: "Vault-relative folder whose files each get their own session titled after the file name. Opening such a file resumes (or creates) the session with that title. Leave empty to disable.",
         control: { type: "text", key: "fileSessionFolder", placeholder: "70-journal/daily-notes" }
@@ -20232,8 +20226,6 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         return this.plugin.settings.shiftEnterNewline;
       case "resumeWithinDays":
         return this.plugin.settings.resumeWithinDays;
-      case "recentTabsCount":
-        return this.plugin.settings.recentTabsCount;
       case "fileSessionFolder":
         return this.plugin.settings.fileSessionFolder;
       default:
@@ -20265,9 +20257,6 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
         break;
       case "resumeWithinDays":
         if (typeof value === "number") this.plugin.settings.resumeWithinDays = value;
-        break;
-      case "recentTabsCount":
-        if (typeof value === "number") this.plugin.settings.recentTabsCount = value;
         break;
       case "fileSessionFolder":
         if (typeof value === "string") this.plugin.settings.fileSessionFolder = value.trim();
@@ -20333,12 +20322,6 @@ var OpencodeSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Resume terminal within days").setDesc("When the ribbon terminal is opened in a note's folder, resume its most recent session if it was updated within this many days. Otherwise start a new session. Set to 0 to always start a new session.").addSlider(
       (slider) => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.resumeWithinDays).onChange(async (value) => {
         this.plugin.settings.resumeWithinDays = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Recent session tabs").setDesc("When a folder's terminal opens, show its most recent sessions in the OpenCode tab bar. Set to 0 to leave the tab bar unchanged.").addSlider(
-      (slider) => slider.setLimits(0, 20, 1).setValue(this.plugin.settings.recentTabsCount).onChange(async (value) => {
-        this.plugin.settings.recentTabsCount = value;
         await this.plugin.saveSettings();
       })
     );
@@ -23287,9 +23270,9 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     const terminalLinks = new TerminalLinks(terminal, {
       vaultRoot: this.plugin.vaultRoot,
       wslDistro: terminalEnvironment.WSL_DISTRO_NAME,
-      hasNote: (path13) => {
+      hasNote: (path12) => {
         var _a2;
-        return Boolean(((_a2 = this.app.vault.getFileByPath(path13)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
+        return Boolean(((_a2 = this.app.vault.getFileByPath(path12)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
       },
       isModEvent: (event) => Boolean(import_obsidian4.Keymap.isModEvent(event)),
       openExternal: (url) => {
@@ -25397,67 +25380,35 @@ var OPENCODE_ICON_SVG = `
 	<path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" />
 </g>`;
 
-// src/utils/sessionTabs.ts
+// src/modules/terminalOpenPlan.ts
+function planTerminalOpen(attachPath, resumeSessionId) {
+  return {
+    kind: resumeSessionId ? "resume" : "new",
+    attachPath: attachPath ? attachPath : null
+  };
+}
+
+// src/modules/tuiBridge.ts
 var fs7 = __toESM(require("fs"));
 var os7 = __toESM(require("os"));
 var path10 = __toESM(require("path"));
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+var TUI_COMMAND_FILE = path10.join(os7.tmpdir(), "opencode", "tui-cmd.json");
+function normalizeDirectory(directory) {
+  return path10.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
-function resolveChannelDirectory() {
-  const root = path10.join(os7.homedir(), ".local", "state", "opencode");
-  const latest = path10.join(root, "latest");
-  if (fs7.existsSync(latest)) return latest;
-  try {
-    const dirs = fs7.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-    if (dirs.length === 1) return path10.join(root, dirs[0]);
-  } catch (e) {
-  }
-  return latest;
+function sameDirectory(a, b) {
+  return normalizeDirectory(a) === normalizeDirectory(b);
 }
-function tabsFilePath() {
-  return path10.join(resolveChannelDirectory(), "tui", "tabs.json");
+function isInsideProject(directory, root) {
+  const normalizedDirectory = normalizeDirectory(directory);
+  const normalizedRoot = normalizeDirectory(root);
+  return normalizedDirectory === normalizedRoot || normalizedDirectory.startsWith(`${normalizedRoot}${path10.sep}`);
 }
-function coerceTab(value) {
-  if (!isRecord2(value) || typeof value.sessionID !== "string") return null;
-  const title = typeof value.title === "string" ? value.title : value.sessionID;
-  return { sessionID: value.sessionID, title };
-}
-function mergeSessionTabs(cwd, sessions) {
-  try {
-    const wanted = sessions.filter((session) => session.id && session.id !== "new");
-    if (wanted.length === 0) return;
-    const file = tabsFilePath();
-    let parsed = {};
-    try {
-      const raw = JSON.parse(fs7.readFileSync(file, "utf8"));
-      if (isRecord2(raw)) parsed = raw;
-    } catch (e) {
-      parsed = {};
-    }
-    const cwdMap = isRecord2(parsed.cwd) ? parsed.cwd : {};
-    const existingBucket = isRecord2(cwdMap[cwd]) ? cwdMap[cwd] : {};
-    const existingTabs = Array.isArray(existingBucket.tabs) ? existingBucket.tabs.map(coerceTab).filter((tab) => tab !== null) : [];
-    const known = new Set(existingTabs.map((tab) => tab.sessionID));
-    const merged = [...existingTabs];
-    for (const session of wanted) {
-      if (known.has(session.id)) continue;
-      merged.push({ sessionID: session.id, title: session.title || session.id });
-      known.add(session.id);
-    }
-    if (merged.length === existingTabs.length) return;
-    const bucket = { ...existingBucket, tabs: merged };
-    if (!isRecord2(bucket.unread)) delete bucket.unread;
-    cwdMap[cwd] = bucket;
-    parsed.cwd = cwdMap;
-    if (!isRecord2(parsed.global)) parsed.global = { tabs: [], unread: {} };
-    fs7.mkdirSync(path10.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
-    fs7.writeFileSync(temp, JSON.stringify(parsed, null, 2));
-    renameWithRetry(temp, file);
-  } catch (error) {
-    console.debug("Unable to merge OpenCode session tabs", error);
-  }
+function shouldSwitchRunningTui(tuiLive, currentTuiCwd, directory, projectRoot) {
+  if (!tuiLive || currentTuiCwd === null) return false;
+  if (sameDirectory(currentTuiCwd, directory)) return true;
+  if (!projectRoot) return false;
+  return isInsideProject(currentTuiCwd, projectRoot) && isInsideProject(directory, projectRoot);
 }
 function renameWithRetry(temp, file, attempts = 4) {
   for (let attempt = 1; ; attempt++) {
@@ -25466,7 +25417,7 @@ function renameWithRetry(temp, file, attempts = 4) {
       return true;
     } catch (error) {
       if (attempt >= attempts) {
-        console.warn(`Unable to write OpenCode session tabs to ${file}`, error);
+        console.warn(`Unable to replace ${file}`, error);
         return false;
       }
       sleepSync(attempt * 20);
@@ -25478,34 +25429,11 @@ function sleepSync(ms) {
   while (Date.now() < end) {
   }
 }
-
-// src/modules/terminalOpenPlan.ts
-function planTerminalOpen(attachPath, resumeSessionId) {
-  return {
-    kind: resumeSessionId ? "resume" : "new",
-    attachPath: attachPath ? attachPath : null
-  };
-}
-
-// src/modules/tuiBridge.ts
-var fs8 = __toESM(require("fs"));
-var os8 = __toESM(require("os"));
-var path11 = __toESM(require("path"));
-var TUI_COMMAND_FILE = path11.join(os8.tmpdir(), "opencode", "tui-cmd.json");
-function normalizeDirectory(directory) {
-  return path11.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
-}
-function sameDirectory(a, b) {
-  return normalizeDirectory(a) === normalizeDirectory(b);
-}
-function shouldSwitchRunningTui(tuiLive, currentTuiCwd, directory) {
-  return tuiLive && currentTuiCwd !== null && sameDirectory(currentTuiCwd, directory);
-}
 function writeCommand(command) {
   try {
-    fs8.mkdirSync(path11.dirname(TUI_COMMAND_FILE), { recursive: true });
+    fs7.mkdirSync(path10.dirname(TUI_COMMAND_FILE), { recursive: true });
     const temporary = `${TUI_COMMAND_FILE}.${process.pid}.tmp`;
-    fs8.writeFileSync(temporary, JSON.stringify(command));
+    fs7.writeFileSync(temporary, JSON.stringify(command));
     if (!renameWithRetry(temporary, TUI_COMMAND_FILE)) {
       throw new Error(`Unable to replace ${TUI_COMMAND_FILE}`);
     }
@@ -25523,7 +25451,7 @@ async function requestNewSession() {
 
 // src/main.ts
 function normalizeDirectory2(directory) {
-  return path12.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
+  return path11.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
 var OpencodePlugin = class extends import_obsidian10.Plugin {
   constructor() {
@@ -25722,23 +25650,23 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     var _a, _b;
     const prefix = "[obsidian-opencode]";
     const directory = this.pluginDirectory();
-    const nodePtyDirectory = path12.join(directory, "native", "node-pty");
-    const entry = path12.join(nodePtyDirectory, "lib", "index.js");
-    const entryExists = fs9.existsSync(entry);
+    const nodePtyDirectory = path11.join(directory, "native", "node-pty");
+    const entry = path11.join(nodePtyDirectory, "lib", "index.js");
+    const entryExists = fs8.existsSync(entry);
     console.log(`${prefix} plugin directory: ${directory}`);
     console.log(`${prefix} node-pty entry: ${entry} (found=${entryExists})`);
     if (entryExists) {
       try {
-        const manifest = JSON.parse(fs9.readFileSync(path12.join(nodePtyDirectory, "package.json"), "utf8"));
+        const manifest = JSON.parse(fs8.readFileSync(path11.join(nodePtyDirectory, "package.json"), "utf8"));
         console.log(`${prefix} node-pty version: ${(_a = manifest.version) != null ? _a : "<unknown>"}`);
       } catch (error) {
         console.log(`${prefix} node-pty version: unreadable (${error instanceof Error ? error.message : String(error)})`);
       }
     }
     if (process.platform === "win32") {
-      const conptyDirectory = path12.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
-      const dll = fs9.existsSync(path12.join(conptyDirectory, "conpty.dll"));
-      const openConsole = fs9.existsSync(path12.join(conptyDirectory, "OpenConsole.exe"));
+      const conptyDirectory = path11.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
+      const dll = fs8.existsSync(path11.join(conptyDirectory, "conpty.dll"));
+      const openConsole = fs8.existsSync(path11.join(conptyDirectory, "OpenConsole.exe"));
       console.log(`${prefix} bundled ConPTY: conpty.dll=${dll} OpenConsole.exe=${openConsole}`);
     }
     console.log(`${prefix} runtime: platform=${process.platform} arch=${process.arch} electron=${(_b = process.versions.electron) != null ? _b : "<none>"} node=${process.versions.node}`);
@@ -25807,7 +25735,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   }
   updateStatusActiveFile(file) {
     if (!this.statusTracker) return;
-    this.statusTracker.updateActiveFile(file ? path12.join(this.vaultRoot, file.path) : null);
+    this.statusTracker.updateActiveFile(file ? path11.join(this.vaultRoot, file.path) : null);
     this.renderStatus(this.statusTracker.status);
   }
   renderStatus(status) {
@@ -25862,7 +25790,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    * command file cannot be written; the caller then restarts the terminal.
    */
   async switchRunningTui(sessionId, directory) {
-    if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory)) return false;
+    if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory, this.vaultRoot)) {
+      return false;
+    }
     await this.activateTerminalView();
     try {
       await requestSessionSwitch(sessionId);
@@ -25920,7 +25850,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   async openActiveNoteTerminal() {
     var _a;
     const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
-    const cwd = file ? path12.join(this.vaultRoot, path12.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
+    const cwd = file ? path11.join(this.vaultRoot, path11.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
     await this.openTerminalForTarget(cwd, file ? file.path : null);
   }
   /**
@@ -25935,11 +25865,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const sessions = await this.listFolderSessions(cwd);
     const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
     const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
-    const recentTabs = this.settings.recentTabsCount > 0 ? sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title })) : null;
-    if (recentTabs) mergeSessionTabs(cwd, recentTabs);
     const plan = planTerminalOpen(attachPath, resumeId);
     if (plan.kind === "resume" && resumeId) {
-      if (await this.switchRunningTui(resumeId, cwd)) return;
+      if (!plan.attachPath && await this.switchRunningTui(resumeId, cwd)) return;
       this.sessionState.setOpenSession(resumeId, cwd);
       this.pendingRouteSessionId = resumeId;
     } else {
@@ -25948,13 +25876,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     }
     this.pendingAttachPath = plan.attachPath;
     await this.openOrRestartTerminal();
-    if (recentTabs) {
-      this.registerInterval(window.setTimeout(() => {
-        if (this.unloading) return;
-        if (this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE).length === 0) return;
-        mergeSessionTabs(cwd, recentTabs);
-      }, 1500));
-    }
   }
   /**
    * Open the terminal for a file-explorer context-menu entry: folders open
@@ -25963,10 +25884,10 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    */
   async openTerminalForFileMenu(file) {
     if (file instanceof import_obsidian10.TFolder) {
-      await this.openTerminalForTarget(path12.join(this.vaultRoot, file.path), null);
+      await this.openTerminalForTarget(path11.join(this.vaultRoot, file.path), null);
       return;
     }
-    await this.openTerminalForTarget(path12.join(this.vaultRoot, path12.dirname(file.path)), file.path);
+    await this.openTerminalForTarget(path11.join(this.vaultRoot, path11.dirname(file.path)), file.path);
   }
   /**
    * When `attachPath` lives in the configured per-file session folder, resume
@@ -25979,8 +25900,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
     if (!folder) return false;
     const posixPath = attachPath.replace(/\\/g, "/");
-    if (path12.posix.dirname(posixPath) !== folder) return false;
-    const name = path12.posix.basename(posixPath).replace(/\.[^./]+$/, "");
+    if (path11.posix.dirname(posixPath) !== folder) return false;
+    const name = path11.posix.basename(posixPath).replace(/\.[^./]+$/, "");
     try {
       const client = new OpencodeClient(
         this.settings.opencodePath || "opencode",

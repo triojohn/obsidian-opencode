@@ -9,7 +9,6 @@ export interface OpencodePluginSettings {
 	newSessionArgs: string;
 	shiftEnterNewline: boolean;
 	resumeWithinDays: number;
-	recentTabsCount: number;
 	fileSessionFolder: string;
 }
 
@@ -22,6 +21,5 @@ export const DEFAULT_SETTINGS: OpencodePluginSettings = {
 	newSessionArgs: "",
 	shiftEnterNewline: true,
 	resumeWithinDays: 1,
-	recentTabsCount: 5,
 	fileSessionFolder: "70-journal/daily-notes",
 };

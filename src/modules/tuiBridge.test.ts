@@ -51,6 +51,22 @@ describe("shouldSwitchRunningTui", () => {
 		expect(shouldSwitchRunningTui(true, project, path.join(tempRoot, "other"))).toBe(false);
 	});
 
+	it("switches in place across directories of the same project", () => {
+		expect(
+			shouldSwitchRunningTui(true, project, path.join(tempRoot, "other"), tempRoot),
+		).toBe(true);
+	});
+
+	it("restarts when the running TUI lives outside the project", () => {
+		const outside = path.join(tempRoot, "..");
+		expect(shouldSwitchRunningTui(true, outside, project, tempRoot)).toBe(false);
+		expect(shouldSwitchRunningTui(true, path.join(outside, "repo"), project, tempRoot)).toBe(false);
+	});
+
+	it("restarts when no project root is given", () => {
+		expect(shouldSwitchRunningTui(true, project, path.join(tempRoot, "other"))).toBe(false);
+	});
+
 	it("restarts when there is no live TUI", () => {
 		expect(shouldSwitchRunningTui(false, project, project)).toBe(false);
 		expect(shouldSwitchRunningTui(true, null, project)).toBe(false);
