@@ -18,6 +18,7 @@ import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
 import { mergeSessionTabs } from "./utils/sessionTabs";
 import { resolvePluginDirectory } from "./utils/path";
 import { planTerminalOpen } from "./modules/terminalOpenPlan";
+import { openSessionInTui, startNewSessionInTui, TuiWriter } from "./modules/tuiInput";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -372,9 +373,38 @@ export default class OpencodePlugin extends Plugin {
 		await this.openOrRestartTerminal();
 	}
 
-	async openTerminalWithSession(sessionId: string, directory: string) {
+	/**
+	 * Opens a session in the terminal.
+	 *
+	 * When a TUI is already running and the session title is known, the running
+	 * TUI is driven through its session picker instead of restarting the
+	 * process. Everything else falls back to a restart with `-s`.
+	 *
+	 * Args:
+	 *   sessionId: Session to open.
+	 *   directory: Session working directory.
+	 *   title: Session title, used to filter the running TUI's session list.
+	 */
+	async openTerminalWithSession(sessionId: string, directory: string, title?: string) {
+		if (title && await this.driveRunningTui((write) => openSessionInTui(write, title))) return;
 		this.sessionState.setOpenSession(sessionId, directory);
 		await this.openOrRestartTerminal();
+	}
+
+	/**
+	 * Runs `drive` against the running terminal's input stream.
+	 *
+	 * Returns false when there is no terminal or it cannot accept injected
+	 * input, so the caller can fall back to restarting the PTY.
+	 *
+	 * Args:
+	 *   drive: Receives a raw input sink; awaited to completion.
+	 */
+	private async driveRunningTui(drive: (write: TuiWriter) => Promise<void>): Promise<boolean> {
+		const view = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]?.view;
+		if (!(view instanceof OpencodeTerminalView)) return false;
+		await this.activateTerminalView();
+		return view.driveInput(drive);
 	}
 
 	/**
@@ -389,16 +419,17 @@ export default class OpencodePlugin extends Plugin {
 			new Notice("OpenCode: session id missing in link");
 			return;
 		}
-		const directory = params.directory?.trim() || await this.resolveSessionDirectory(sessionId);
+		const session = await this.resolveSession(sessionId);
+		const directory = params.directory?.trim() || session?.directory;
 		if (!directory) {
 			new Notice(`OpenCode session not found: ${sessionId}`);
 			return;
 		}
-		await this.openTerminalWithSession(sessionId, directory);
+		await this.openTerminalWithSession(sessionId, directory, session?.title);
 	}
 
-	/** Look up a session's working directory, or null when it is unknown. */
-	private async resolveSessionDirectory(sessionId: string): Promise<string | null> {
+	/** Look up a session's directory and title, or null when it is unknown. */
+	private async resolveSession(sessionId: string): Promise<OpencodeSession | null> {
 		const cwd = this.settings.defaultWorkingDirectory || this.vaultRoot;
 		try {
 			const client = new OpencodeClient(
@@ -408,9 +439,9 @@ export default class OpencodePlugin extends Plugin {
 			);
 			const compatibility = await client.checkCompatibility();
 			const sessions = await client.listSessions(compatibility.generation);
-			return sessions.find((session) => session.id === sessionId)?.directory ?? null;
+			return sessions.find((session) => session.id === sessionId) ?? null;
 		} catch (error) {
-			console.debug("Unable to resolve OpenCode session directory", error);
+			console.debug("Unable to resolve OpenCode session", error);
 			return null;
 		}
 	}
@@ -452,16 +483,30 @@ export default class OpencodePlugin extends Plugin {
 		if (recentTabs) mergeSessionTabs(cwd, recentTabs);
 
 		const plan = planTerminalOpen(attachPath, resumeId);
+		const title = resumeId ? sessions.find((session) => session.id === resumeId)?.title : undefined;
 		if (plan.kind === "resume" && resumeId) {
-			this.sessionState.setOpenSession(resumeId, cwd);
-			this.pendingRouteSessionId = resumeId;
+			const driven = title
+				? await this.driveRunningTui(async (write) => {
+					await openSessionInTui(write, title);
+					if (plan.attachPath) write(`@${plan.attachPath}`);
+				})
+				: false;
+			if (!driven) {
+				this.sessionState.setOpenSession(resumeId, cwd);
+				this.pendingRouteSessionId = resumeId;
+				this.pendingAttachPath = plan.attachPath;
+				await this.openOrRestartTerminal();
+			}
 		} else {
-			this.sessionState.setNewSession();
-			this.sessionCwd = cwd;
+			const driven = await this.driveRunningTui((write) => startNewSessionInTui(write, plan.attachPath));
+			if (!driven) {
+				this.sessionState.setNewSession();
+				this.sessionCwd = cwd;
+				this.pendingAttachPath = plan.attachPath;
+				await this.openOrRestartTerminal();
+			}
 		}
-		this.pendingAttachPath = plan.attachPath;
-
-		await this.openOrRestartTerminal();
+		this.pendingAttachPath = null;
 
 		if (recentTabs) {
 			// The first write can lose a Windows rename race with the TUI's own
@@ -508,6 +553,13 @@ export default class OpencodePlugin extends Plugin {
 				this.settings.environmentVariables,
 			);
 			const found = await client.findSessionByTitle(name, cwd);
+			if (found) {
+				const driven = await this.driveRunningTui(async (write) => {
+					await openSessionInTui(write, found.title || name);
+					write(`@${attachPath}`);
+				});
+				if (driven) return true;
+			}
 			const session = found ?? await client.createSession({ title: name, directory: cwd });
 			// The note is attached whether the per-file session was found or
 			// created, so resuming it still pre-fills the file.
