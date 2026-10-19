@@ -18,6 +18,7 @@ import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
 import { mergeSessionTabs } from "./utils/sessionTabs";
 import { resolvePluginDirectory } from "./utils/path";
 import { planTerminalOpen } from "./modules/terminalOpenPlan";
+import { requestSessionSwitch, shouldSwitchRunningTui } from "./modules/tuiBridge";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -30,6 +31,8 @@ export default class OpencodePlugin extends Plugin {
 	settings: OpencodePluginSettings;
 	vaultRoot: string = "";
 	vaultConfigDir: string = "";
+	/** Directory the running TUI was spawned in; kept across one-time resets. */
+	currentTuiCwd: string | null = null;
 	private sessionState: SessionState;
 	private viewCoordinator: ViewCoordinator;
 	private readonly ptySessions = new PtySessionRegistry();
@@ -369,6 +372,17 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	async openTerminalWithSession(sessionId: string, directory: string) {
+		const view = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]?.view;
+		const tuiLive = view instanceof OpencodeTerminalView && view.isTuiReady;
+		if (shouldSwitchRunningTui(tuiLive, this.currentTuiCwd, directory)) {
+			await this.activateTerminalView();
+			try {
+				await requestSessionSwitch(sessionId);
+				return;
+			} catch (error) {
+				console.debug("Falling back to a terminal restart", error);
+			}
+		}
 		this.sessionState.setOpenSession(sessionId, directory);
 		await this.openOrRestartTerminal();
 	}

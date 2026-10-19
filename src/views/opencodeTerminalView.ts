@@ -75,6 +75,11 @@ export class OpencodeTerminalView extends ItemView {
 		return OPENCODE_TERMINAL_VIEW_TYPE;
 	}
 
+	/** True while the PTY is alive and the TUI accepts session commands. */
+	get isTuiReady(): boolean {
+		return this.ptySession.isTuiReady && this.ptySession.ptyProcess !== null;
+	}
+
 	getDisplayText() {
 		return "Opencode";
 	}
@@ -719,6 +724,9 @@ export class OpencodeTerminalView extends ItemView {
 	private async spawnPty(terminal: Terminal): Promise<void> {
 		const defaultCwd = this.plugin.settings.defaultWorkingDirectory || this.plugin.vaultRoot;
 		const cwd = this.plugin.sessionCwd || defaultCwd;
+		// Survives the one-time sessionCwd reset below: the session-switch
+		// bridge needs to know which directory the running TUI is rooted in.
+		this.plugin.currentTuiCwd = cwd;
 		const configuredPath = this.plugin.settings.opencodePath || "opencode";
 		let opencodePath: string;
 		try {

@@ -113,16 +113,19 @@ export function mergeSessionTabs(cwd: string, sessions: SessionTabEntry[]): void
  * The OpenCode TUI may briefly hold `file` open while flushing its own tab
  * state; a short backoff lets this write win the race instead of dropping the
  * merge silently. Logs with the full path on final failure.
+ *
+ * Returns:
+ *   True when the rename succeeded, false after the last attempt.
  */
-function renameWithRetry(temp: string, file: string, attempts = 4): void {
+export function renameWithRetry(temp: string, file: string, attempts = 4): boolean {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			fs.renameSync(temp, file);
-			return;
+			return true;
 		} catch (error) {
 			if (attempt >= attempts) {
 				console.warn(`Unable to write OpenCode session tabs to ${file}`, error);
-				return;
+				return false;
 			}
 			sleepSync(attempt * 20);
 		}

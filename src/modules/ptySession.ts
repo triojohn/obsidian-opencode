@@ -677,6 +677,11 @@ export class PtySession {
 	 * Args:
 	 *   callback: Invoked once, immediately if the TUI is already ready.
 	 */
+	/** True once the TUI is warm enough to accept injected input. */
+	get isTuiReady(): boolean {
+		return this.tuiReady;
+	}
+
 	onTuiReady(callback: () => void): void {
 		if (this.tuiReady) {
 			callback();

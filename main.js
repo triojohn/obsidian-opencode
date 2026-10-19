@@ -20043,8 +20043,8 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
-var path11 = __toESM(require("node:path"));
-var fs8 = __toESM(require("node:fs"));
+var path12 = __toESM(require("node:path"));
+var fs9 = __toESM(require("node:fs"));
 
 // src/settings.ts
 var DEFAULT_SETTINGS = {
@@ -21224,7 +21224,7 @@ var EditorServer = class {
     this.publishLock = (_a = options.publishLock) != null ? _a : true;
   }
   async start(vaultRoot) {
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       this.wss = new import_websocket_server.default({ port: 0 }, () => {
         const address = this.wss.address();
         if (typeof address === "object" && address !== null) {
@@ -21243,7 +21243,7 @@ var EditorServer = class {
           };
           fs2.writeFileSync(this.lockFilePath, JSON.stringify(lockContent, null, 2));
         }
-        resolve4(this.port);
+        resolve5(this.port);
       });
       this.wss.on("error", (err) => {
         reject(err);
@@ -21288,7 +21288,7 @@ var EditorServer = class {
     }
   }
   async stop() {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       if (this.lockFilePath && fs2.existsSync(this.lockFilePath)) {
         fs2.unlinkSync(this.lockFilePath);
       }
@@ -21300,10 +21300,10 @@ var EditorServer = class {
       if (this.wss) {
         this.wss.close(() => {
           this.wss = null;
-          resolve4();
+          resolve5();
         });
       } else {
-        resolve4();
+        resolve5();
       }
     });
   }
@@ -21878,7 +21878,7 @@ function decodeBase64Utf8(encoded) {
   }
 }
 function runProcess(executable, args, input) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     var _a;
     const child = (0, import_node_child_process.execFile)(executable, args, {
       encoding: "utf8",
@@ -21890,7 +21890,7 @@ function runProcess(executable, args, input) {
         reject(new Error(detail ? `${error.message}: ${detail}` : error.message));
         return;
       }
-      resolve4({ stdout: String(stdout), stderr: String(stderr) });
+      resolve5({ stdout: String(stdout), stderr: String(stderr) });
     });
     if (input !== void 0) (_a = child.stdin) == null ? void 0 : _a.end(input, "utf8");
   });
@@ -22502,7 +22502,7 @@ function windowsCommandReferences(tokens, env) {
 }
 var CLI_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 function runExecFile(executable, args, opts) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     var _a, _b;
     let file = process.platform === "win32" ? (_a = findExecutableOnPath(executable, { platform: "win32", environment: opts.env })) != null ? _a : executable : executable;
     let fileArgs = args;
@@ -22520,7 +22520,7 @@ function runExecFile(executable, args, opts) {
         if (stderr) failure.stderr = stderr.toString();
         reject(failure);
       } else {
-        resolve4({ stdout: (_a2 = stdout == null ? void 0 : stdout.toString()) != null ? _a2 : "", stderr: (_b2 = stderr == null ? void 0 : stderr.toString()) != null ? _b2 : "" });
+        resolve5({ stdout: (_a2 = stdout == null ? void 0 : stdout.toString()) != null ? _a2 : "", stderr: (_b2 = stderr == null ? void 0 : stderr.toString()) != null ? _b2 : "" });
       }
     });
   });
@@ -22979,7 +22979,7 @@ ${result.stderr}`;
     return normalizeV2Export(data);
   }
   exportSessionStreamed(sessionId, generation, maxBytes = 200 * 1024 * 1024) {
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (!SAFE_ID_RE.test(sessionId)) {
         reject(new Error(`Invalid session ID: ${sessionId}`));
         return;
@@ -23039,7 +23039,7 @@ ${result.stderr}`;
           const stdout = fs5.readFileSync(tmpFile, "utf-8");
           cleanup();
           const data = JSON.parse(stdout);
-          resolve4(data);
+          resolve5(data);
         } catch (parseError) {
           cleanup();
           reject(parseError instanceof Error ? parseError : new Error(String(parseError)));
@@ -23178,6 +23178,10 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
   getViewType() {
     return OPENCODE_TERMINAL_VIEW_TYPE;
   }
+  /** True while the PTY is alive and the TUI accepts session commands. */
+  get isTuiReady() {
+    return this.ptySession.isTuiReady && this.ptySession.ptyProcess !== null;
+  }
   getDisplayText() {
     return "Opencode";
   }
@@ -23283,9 +23287,9 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
     const terminalLinks = new TerminalLinks(terminal, {
       vaultRoot: this.plugin.vaultRoot,
       wslDistro: terminalEnvironment.WSL_DISTRO_NAME,
-      hasNote: (path12) => {
+      hasNote: (path13) => {
         var _a2;
-        return Boolean(((_a2 = this.app.vault.getFileByPath(path12)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
+        return Boolean(((_a2 = this.app.vault.getFileByPath(path13)) == null ? void 0 : _a2.extension.toLowerCase()) === "md");
       },
       isModEvent: (event) => Boolean(import_obsidian4.Keymap.isModEvent(event)),
       openExternal: (url) => {
@@ -23761,6 +23765,7 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
   async spawnPty(terminal) {
     const defaultCwd = this.plugin.settings.defaultWorkingDirectory || this.plugin.vaultRoot;
     const cwd = this.plugin.sessionCwd || defaultCwd;
+    this.plugin.currentTuiCwd = cwd;
     const configuredPath = this.plugin.settings.opencodePath || "opencode";
     let opencodePath;
     try {
@@ -24849,30 +24854,30 @@ function unixTerminalSize(terminal) {
 }
 function childExit(child) {
   if (!child || !child.pid || child.exitCode != null || child.signalCode != null) return Promise.resolve();
-  return new Promise((resolve4) => {
+  return new Promise((resolve5) => {
     const finish = () => {
       child.removeListener("exit", finish);
-      resolve4();
+      resolve5();
     };
     child.once("exit", finish);
   });
 }
 function childClose(child) {
   if (!child.pid || child.exitCode != null || child.signalCode != null) return Promise.resolve();
-  return new Promise((resolve4) => {
-    child.once("close", resolve4);
+  return new Promise((resolve5) => {
+    child.once("close", resolve5);
   });
 }
 function withTimeout(promise, timeoutMs) {
-  return new Promise((resolve4) => {
+  return new Promise((resolve5) => {
     const timeoutWindow = window;
-    const timeout = timeoutWindow.setTimeout(() => resolve4(null), timeoutMs);
+    const timeout = timeoutWindow.setTimeout(() => resolve5(null), timeoutMs);
     promise.then((value) => {
       timeoutWindow.clearTimeout(timeout);
-      resolve4(value);
+      resolve5(value);
     }, () => {
       timeoutWindow.clearTimeout(timeout);
-      resolve4(null);
+      resolve5(null);
     });
   });
 }
@@ -25123,7 +25128,7 @@ Error: ${err.message}\r
       if (this.backend === 1 /* WindowsConPty */ && ptyProcess.pid) {
         const ptyExited = childExit(ptyProcess);
         const jobExited = childExit(windowsJobProcess);
-        const taskkillSucceeded = await new Promise((resolve4) => {
+        const taskkillSucceeded = await new Promise((resolve5) => {
           const timeoutWindow = window;
           let settled = false;
           let taskkill = null;
@@ -25132,7 +25137,7 @@ Error: ${err.message}\r
             settled = true;
             timeoutWindow.clearTimeout(timeout);
             if (!succeeded) taskkill == null ? void 0 : taskkill.kill();
-            resolve4(succeeded);
+            resolve5(succeeded);
           };
           const timeout = timeoutWindow.setTimeout(() => finish(false), 5e3);
           try {
@@ -25183,6 +25188,10 @@ Error: ${err.message}\r
    * Args:
    *   callback: Invoked once, immediately if the TUI is already ready.
    */
+  /** True once the TUI is warm enough to accept injected input. */
+  get isTuiReady() {
+    return this.tuiReady;
+  }
   onTuiReady(callback) {
     if (this.tuiReady) {
       callback();
@@ -25454,11 +25463,11 @@ function renameWithRetry(temp, file, attempts = 4) {
   for (let attempt = 1; ; attempt++) {
     try {
       fs7.renameSync(temp, file);
-      return;
+      return true;
     } catch (error) {
       if (attempt >= attempts) {
         console.warn(`Unable to write OpenCode session tabs to ${file}`, error);
-        return;
+        return false;
       }
       sleepSync(attempt * 20);
     }
@@ -25478,15 +25487,45 @@ function planTerminalOpen(attachPath, resumeSessionId) {
   };
 }
 
-// src/main.ts
+// src/modules/tuiBridge.ts
+var fs8 = __toESM(require("fs"));
+var os8 = __toESM(require("os"));
+var path11 = __toESM(require("path"));
+var TUI_COMMAND_FILE = path11.join(os8.tmpdir(), "opencode", "tui-cmd.json");
 function normalizeDirectory(directory) {
   return path11.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
+}
+function sameDirectory(a, b) {
+  return normalizeDirectory(a) === normalizeDirectory(b);
+}
+function shouldSwitchRunningTui(tuiLive, currentTuiCwd, directory) {
+  return tuiLive && currentTuiCwd !== null && sameDirectory(currentTuiCwd, directory);
+}
+async function requestSessionSwitch(sessionId) {
+  try {
+    fs8.mkdirSync(path11.dirname(TUI_COMMAND_FILE), { recursive: true });
+    const temporary = `${TUI_COMMAND_FILE}.${process.pid}.tmp`;
+    fs8.writeFileSync(temporary, JSON.stringify({ sessionID: sessionId }));
+    if (!renameWithRetry(temporary, TUI_COMMAND_FILE)) {
+      throw new Error(`Unable to replace ${TUI_COMMAND_FILE}`);
+    }
+  } catch (error) {
+    console.warn("Unable to request an OpenCode TUI session switch", error);
+    throw error;
+  }
+}
+
+// src/main.ts
+function normalizeDirectory2(directory) {
+  return path12.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
 var OpencodePlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
     this.vaultRoot = "";
     this.vaultConfigDir = "";
+    /** Directory the running TUI was spawned in; kept across one-time resets. */
+    this.currentTuiCwd = null;
     this.ptySessions = new PtySessionRegistry();
     this.statusTracker = null;
     this.statusSource = null;
@@ -25530,8 +25569,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   }
   async onload() {
     var _a;
-    this.ready = new Promise((resolve4) => {
-      this.resolveReady = resolve4;
+    this.ready = new Promise((resolve5) => {
+      this.resolveReady = resolve5;
     });
     this.registerObsidianProtocolHandler("opencode", (params) => {
       void this.ready.then(() => this.openSessionFromUri(params));
@@ -25677,23 +25716,23 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     var _a, _b;
     const prefix = "[obsidian-opencode]";
     const directory = this.pluginDirectory();
-    const nodePtyDirectory = path11.join(directory, "native", "node-pty");
-    const entry = path11.join(nodePtyDirectory, "lib", "index.js");
-    const entryExists = fs8.existsSync(entry);
+    const nodePtyDirectory = path12.join(directory, "native", "node-pty");
+    const entry = path12.join(nodePtyDirectory, "lib", "index.js");
+    const entryExists = fs9.existsSync(entry);
     console.log(`${prefix} plugin directory: ${directory}`);
     console.log(`${prefix} node-pty entry: ${entry} (found=${entryExists})`);
     if (entryExists) {
       try {
-        const manifest = JSON.parse(fs8.readFileSync(path11.join(nodePtyDirectory, "package.json"), "utf8"));
+        const manifest = JSON.parse(fs9.readFileSync(path12.join(nodePtyDirectory, "package.json"), "utf8"));
         console.log(`${prefix} node-pty version: ${(_a = manifest.version) != null ? _a : "<unknown>"}`);
       } catch (error) {
         console.log(`${prefix} node-pty version: unreadable (${error instanceof Error ? error.message : String(error)})`);
       }
     }
     if (process.platform === "win32") {
-      const conptyDirectory = path11.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
-      const dll = fs8.existsSync(path11.join(conptyDirectory, "conpty.dll"));
-      const openConsole = fs8.existsSync(path11.join(conptyDirectory, "OpenConsole.exe"));
+      const conptyDirectory = path12.join(nodePtyDirectory, "prebuilds", "win32-x64", "conpty");
+      const dll = fs9.existsSync(path12.join(conptyDirectory, "conpty.dll"));
+      const openConsole = fs9.existsSync(path12.join(conptyDirectory, "OpenConsole.exe"));
       console.log(`${prefix} bundled ConPTY: conpty.dll=${dll} OpenConsole.exe=${openConsole}`);
     }
     console.log(`${prefix} runtime: platform=${process.platform} arch=${process.arch} electron=${(_b = process.versions.electron) != null ? _b : "<none>"} node=${process.versions.node}`);
@@ -25762,7 +25801,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   }
   updateStatusActiveFile(file) {
     if (!this.statusTracker) return;
-    this.statusTracker.updateActiveFile(file ? path11.join(this.vaultRoot, file.path) : null);
+    this.statusTracker.updateActiveFile(file ? path12.join(this.vaultRoot, file.path) : null);
     this.renderStatus(this.statusTracker.status);
   }
   renderStatus(status) {
@@ -25791,6 +25830,18 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     await this.openOrRestartTerminal();
   }
   async openTerminalWithSession(sessionId, directory) {
+    var _a;
+    const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
+    const tuiLive = view instanceof OpencodeTerminalView && view.isTuiReady;
+    if (shouldSwitchRunningTui(tuiLive, this.currentTuiCwd, directory)) {
+      await this.activateTerminalView();
+      try {
+        await requestSessionSwitch(sessionId);
+        return;
+      } catch (error) {
+        console.debug("Falling back to a terminal restart", error);
+      }
+    }
     this.sessionState.setOpenSession(sessionId, directory);
     await this.openOrRestartTerminal();
   }
@@ -25842,7 +25893,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   async openActiveNoteTerminal() {
     var _a;
     const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
-    const cwd = file ? path11.join(this.vaultRoot, path11.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
+    const cwd = file ? path12.join(this.vaultRoot, path12.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
     await this.openTerminalForTarget(cwd, file ? file.path : null);
   }
   /**
@@ -25884,10 +25935,10 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    */
   async openTerminalForFileMenu(file) {
     if (file instanceof import_obsidian10.TFolder) {
-      await this.openTerminalForTarget(path11.join(this.vaultRoot, file.path), null);
+      await this.openTerminalForTarget(path12.join(this.vaultRoot, file.path), null);
       return;
     }
-    await this.openTerminalForTarget(path11.join(this.vaultRoot, path11.dirname(file.path)), file.path);
+    await this.openTerminalForTarget(path12.join(this.vaultRoot, path12.dirname(file.path)), file.path);
   }
   /**
    * When `attachPath` lives in the configured per-file session folder, resume
@@ -25900,8 +25951,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
     if (!folder) return false;
     const posixPath = attachPath.replace(/\\/g, "/");
-    if (path11.posix.dirname(posixPath) !== folder) return false;
-    const name = path11.posix.basename(posixPath).replace(/\.[^./]+$/, "");
+    if (path12.posix.dirname(posixPath) !== folder) return false;
+    const name = path12.posix.basename(posixPath).replace(/\.[^./]+$/, "");
     try {
       const client = new OpencodeClient(
         this.settings.opencodePath || "opencode",
@@ -25930,8 +25981,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       );
       const compatibility = await client.checkCompatibility();
       const sessions = await client.listSessions(compatibility.generation);
-      const target = normalizeDirectory(cwd);
-      return sessions.filter((session) => normalizeDirectory(session.directory) === target).sort((a, b) => b.updated - a.updated);
+      const target = normalizeDirectory2(cwd);
+      return sessions.filter((session) => normalizeDirectory2(session.directory) === target).sort((a, b) => b.updated - a.updated);
     } catch (error) {
       console.debug("Unable to list OpenCode sessions for the folder", error);
       return [];
