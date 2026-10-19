@@ -18,7 +18,7 @@ import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
 import { mergeSessionTabs } from "./utils/sessionTabs";
 import { resolvePluginDirectory } from "./utils/path";
 import { planTerminalOpen } from "./modules/terminalOpenPlan";
-import { requestSessionSwitch, shouldSwitchRunningTui } from "./modules/tuiBridge";
+import { requestNewSession, requestSessionSwitch, shouldSwitchRunningTui } from "./modules/tuiBridge";
 
 /**
  * Normalize a directory for comparison across case and trailing separators.
@@ -362,6 +362,15 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	async newSession() {
+		if (this.runningTuiLive()) {
+			await this.activateTerminalView();
+			try {
+				await requestNewSession();
+				return;
+			} catch (error) {
+				console.debug("Falling back to a terminal restart", error);
+			}
+		}
 		this.sessionState.setNewSession();
 		await this.openOrRestartTerminal();
 	}
@@ -372,19 +381,33 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	async openTerminalWithSession(sessionId: string, directory: string) {
-		const view = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]?.view;
-		const tuiLive = view instanceof OpencodeTerminalView && view.isTuiReady;
-		if (shouldSwitchRunningTui(tuiLive, this.currentTuiCwd, directory)) {
-			await this.activateTerminalView();
-			try {
-				await requestSessionSwitch(sessionId);
-				return;
-			} catch (error) {
-				console.debug("Falling back to a terminal restart", error);
-			}
-		}
+		if (await this.switchRunningTui(sessionId, directory)) return;
 		this.sessionState.setOpenSession(sessionId, directory);
 		await this.openOrRestartTerminal();
+	}
+
+	/** True when the terminal view has a live, input-ready PTY. */
+	private runningTuiLive(): boolean {
+		const view = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]?.view;
+		return view instanceof OpencodeTerminalView && view.isTuiReady;
+	}
+
+	/**
+	 * Hand a session switch to the running TUI when it lives in `directory`.
+	 *
+	 * Returns false when the TUI is not live, runs in another directory, or the
+	 * command file cannot be written; the caller then restarts the terminal.
+	 */
+	private async switchRunningTui(sessionId: string, directory: string): Promise<boolean> {
+		if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory)) return false;
+		await this.activateTerminalView();
+		try {
+			await requestSessionSwitch(sessionId);
+			return true;
+		} catch (error) {
+			console.debug("Falling back to a terminal restart", error);
+			return false;
+		}
 	}
 
 	/**
@@ -463,6 +486,7 @@ export default class OpencodePlugin extends Plugin {
 
 		const plan = planTerminalOpen(attachPath, resumeId);
 		if (plan.kind === "resume" && resumeId) {
+			if (await this.switchRunningTui(resumeId, cwd)) return;
 			this.sessionState.setOpenSession(resumeId, cwd);
 			this.pendingRouteSessionId = resumeId;
 		} else {
@@ -519,6 +543,9 @@ export default class OpencodePlugin extends Plugin {
 			);
 			const found = await client.findSessionByTitle(name, cwd);
 			const session = found ?? await client.createSession({ title: name, directory: cwd });
+			// A per-file session that is already open in a live TUI is focused in
+			// place; the note is not pre-filled in that case.
+			if (found && await this.switchRunningTui(found.id, cwd)) return true;
 			// The note is attached whether the per-file session was found or
 			// created, so resuming it still pre-fills the file.
 			const plan = planTerminalOpen(attachPath, session.id);

@@ -41,10 +41,33 @@ export function shouldSwitchRunningTui(
 }
 
 /**
- * Ask the running TUI to focus `sessionId`.
+ * Write one command to the queue file.
  *
- * Writes `{"sessionID": ...}` atomically (temporary file + rename) so the TUI
- * never reads a half-written command.
+ * The write is atomic (temporary file + rename) so the TUI never reads a
+ * half-written command.
+ *
+ * Args:
+ *   command: Command object serialized into the queue file.
+ *
+ * Raises:
+ *   Error: When the command file cannot be written.
+ */
+function writeCommand(command: Record<string, unknown>): void {
+	try {
+		fs.mkdirSync(path.dirname(TUI_COMMAND_FILE), { recursive: true });
+		const temporary = `${TUI_COMMAND_FILE}.${process.pid}.tmp`;
+		fs.writeFileSync(temporary, JSON.stringify(command));
+		if (!renameWithRetry(temporary, TUI_COMMAND_FILE)) {
+			throw new Error(`Unable to replace ${TUI_COMMAND_FILE}`);
+		}
+	} catch (error) {
+		console.warn("Unable to write an OpenCode TUI command", error);
+		throw error;
+	}
+}
+
+/**
+ * Ask the running TUI to focus `sessionId`.
  *
  * Args:
  *   sessionId: OpenCode session id to focus.
@@ -53,15 +76,15 @@ export function shouldSwitchRunningTui(
  *   Error: When the command file cannot be written.
  */
 export async function requestSessionSwitch(sessionId: string): Promise<void> {
-	try {
-		fs.mkdirSync(path.dirname(TUI_COMMAND_FILE), { recursive: true });
-		const temporary = `${TUI_COMMAND_FILE}.${process.pid}.tmp`;
-		fs.writeFileSync(temporary, JSON.stringify({ sessionID: sessionId }));
-		if (!renameWithRetry(temporary, TUI_COMMAND_FILE)) {
-			throw new Error(`Unable to replace ${TUI_COMMAND_FILE}`);
-		}
-	} catch (error) {
-		console.warn("Unable to request an OpenCode TUI session switch", error);
-		throw error;
-	}
+	writeCommand({ action: "focus", sessionID: sessionId });
+}
+
+/**
+ * Ask the running TUI to start a new session.
+ *
+ * Raises:
+ *   Error: When the command file cannot be written.
+ */
+export async function requestNewSession(): Promise<void> {
+	writeCommand({ action: "new" });
 }

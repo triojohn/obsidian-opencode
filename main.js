@@ -25501,18 +25501,24 @@ function sameDirectory(a, b) {
 function shouldSwitchRunningTui(tuiLive, currentTuiCwd, directory) {
   return tuiLive && currentTuiCwd !== null && sameDirectory(currentTuiCwd, directory);
 }
-async function requestSessionSwitch(sessionId) {
+function writeCommand(command) {
   try {
     fs8.mkdirSync(path11.dirname(TUI_COMMAND_FILE), { recursive: true });
     const temporary = `${TUI_COMMAND_FILE}.${process.pid}.tmp`;
-    fs8.writeFileSync(temporary, JSON.stringify({ sessionID: sessionId }));
+    fs8.writeFileSync(temporary, JSON.stringify(command));
     if (!renameWithRetry(temporary, TUI_COMMAND_FILE)) {
       throw new Error(`Unable to replace ${TUI_COMMAND_FILE}`);
     }
   } catch (error) {
-    console.warn("Unable to request an OpenCode TUI session switch", error);
+    console.warn("Unable to write an OpenCode TUI command", error);
     throw error;
   }
+}
+async function requestSessionSwitch(sessionId) {
+  writeCommand({ action: "focus", sessionID: sessionId });
+}
+async function requestNewSession() {
+  writeCommand({ action: "new" });
 }
 
 // src/main.ts
@@ -25822,6 +25828,15 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     await this.viewCoordinator.toggleTerminalSidebar();
   }
   async newSession() {
+    if (this.runningTuiLive()) {
+      await this.activateTerminalView();
+      try {
+        await requestNewSession();
+        return;
+      } catch (error) {
+        console.debug("Falling back to a terminal restart", error);
+      }
+    }
     this.sessionState.setNewSession();
     await this.openOrRestartTerminal();
   }
@@ -25830,20 +25845,32 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     await this.openOrRestartTerminal();
   }
   async openTerminalWithSession(sessionId, directory) {
-    var _a;
-    const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
-    const tuiLive = view instanceof OpencodeTerminalView && view.isTuiReady;
-    if (shouldSwitchRunningTui(tuiLive, this.currentTuiCwd, directory)) {
-      await this.activateTerminalView();
-      try {
-        await requestSessionSwitch(sessionId);
-        return;
-      } catch (error) {
-        console.debug("Falling back to a terminal restart", error);
-      }
-    }
+    if (await this.switchRunningTui(sessionId, directory)) return;
     this.sessionState.setOpenSession(sessionId, directory);
     await this.openOrRestartTerminal();
+  }
+  /** True when the terminal view has a live, input-ready PTY. */
+  runningTuiLive() {
+    var _a;
+    const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
+    return view instanceof OpencodeTerminalView && view.isTuiReady;
+  }
+  /**
+   * Hand a session switch to the running TUI when it lives in `directory`.
+   *
+   * Returns false when the TUI is not live, runs in another directory, or the
+   * command file cannot be written; the caller then restarts the terminal.
+   */
+  async switchRunningTui(sessionId, directory) {
+    if (!shouldSwitchRunningTui(this.runningTuiLive(), this.currentTuiCwd, directory)) return false;
+    await this.activateTerminalView();
+    try {
+      await requestSessionSwitch(sessionId);
+      return true;
+    } catch (error) {
+      console.debug("Falling back to a terminal restart", error);
+      return false;
+    }
   }
   /**
    * Handle an `obsidian://opencode?session=<id>[&directory=<dir>]` link.
@@ -25912,6 +25939,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     if (recentTabs) mergeSessionTabs(cwd, recentTabs);
     const plan = planTerminalOpen(attachPath, resumeId);
     if (plan.kind === "resume" && resumeId) {
+      if (await this.switchRunningTui(resumeId, cwd)) return;
       this.sessionState.setOpenSession(resumeId, cwd);
       this.pendingRouteSessionId = resumeId;
     } else {
@@ -25961,6 +25989,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       );
       const found = await client.findSessionByTitle(name, cwd);
       const session = found != null ? found : await client.createSession({ title: name, directory: cwd });
+      if (found && await this.switchRunningTui(found.id, cwd)) return true;
       const plan = planTerminalOpen(attachPath, session.id);
       this.sessionState.setOpenSession(session.id, cwd);
       this.pendingRouteSessionId = session.id;

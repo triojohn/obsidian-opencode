@@ -13,7 +13,7 @@ vi.mock("os", async () => {
 	return { ...actual, tmpdir: () => tempRoot };
 });
 
-import { TUI_COMMAND_FILE, requestSessionSwitch, shouldSwitchRunningTui } from "./tuiBridge";
+import { TUI_COMMAND_FILE, requestNewSession, requestSessionSwitch, shouldSwitchRunningTui } from "./tuiBridge";
 
 afterEach(() => {
 	fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -25,7 +25,18 @@ describe("requestSessionSwitch", () => {
 
 		await requestSessionSwitch("ses_123");
 
-		expect(JSON.parse(fs.readFileSync(TUI_COMMAND_FILE, "utf8"))).toEqual({ sessionID: "ses_123" });
+		expect(JSON.parse(fs.readFileSync(TUI_COMMAND_FILE, "utf8"))).toEqual({
+			action: "focus",
+			sessionID: "ses_123",
+		});
+	});
+});
+
+describe("requestNewSession", () => {
+	it("writes the new-session command to the command file", async () => {
+		await requestNewSession();
+
+		expect(JSON.parse(fs.readFileSync(TUI_COMMAND_FILE, "utf8"))).toEqual({ action: "new" });
 	});
 });
 
