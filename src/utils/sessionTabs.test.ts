@@ -9,7 +9,7 @@ vi.mock("os", async (importOriginal) => {
 	return { ...actual, default: { ...actual, homedir: () => home.value }, homedir: () => home.value };
 });
 
-import { mergeSessionTabs, readSessionTabs } from "./sessionTabs";
+import { mergeSessionTabs } from "./sessionTabs";
 
 describe("mergeSessionTabs", () => {
 	let dir: string;
@@ -61,64 +61,5 @@ describe("mergeSessionTabs", () => {
 		fs.writeFileSync(tabsPath(), "{ not json");
 		mergeSessionTabs(cwd, [{ id: "ses_a", title: "A" }]);
 		expect((readTabs().cwd as Record<string, { tabs: unknown[] }>)[cwd].tabs).toHaveLength(1);
-	});
-});
-
-describe("readSessionTabs", () => {
-	let dir: string;
-	const cwd = "C:\\vault\\10-projects\\demo";
-	const CWD_OTHER_KEY = "C:\\vault\\10-projects\\other";
-
-	function tabsPath(): string {
-		return path.join(home.value, ".local", "state", "opencode", "latest", "tui", "tabs.json");
-	}
-
-	function writeTabs(content: unknown): void {
-		fs.mkdirSync(path.dirname(tabsPath()), { recursive: true });
-		fs.writeFileSync(tabsPath(), typeof content === "string" ? content : JSON.stringify(content));
-	}
-
-	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), "tabs-"));
-		home.value = dir;
-	});
-
-	afterEach(() => {
-		fs.rmSync(dir, { recursive: true, force: true });
-	});
-
-	it("returns the bucket for the matching cwd only", () => {
-		writeTabs({
-			cwd: {
-				[CWD_OTHER_KEY]: { tabs: [{ sessionID: "ses_other", title: "Other" }] },
-				[cwd]: { tabs: [{ sessionID: "ses_a", title: "A" }] },
-			},
-		});
-		expect(readSessionTabs(cwd)).toEqual([{ id: "ses_a", title: "A" }]);
-		expect(readSessionTabs(CWD_OTHER_KEY)).toEqual([{ id: "ses_other", title: "Other" }]);
-	});
-
-	it("matches the cwd key across case and slash style", () => {
-		writeTabs({ cwd: { "c:/VAULT/10-projects/demo/": { tabs: [{ sessionID: "ses_a", title: "A" }] } } });
-		expect(readSessionTabs(cwd)).toEqual([{ id: "ses_a", title: "A" }]);
-	});
-
-	it("returns an empty list for broken JSON", () => {
-		writeTabs("{ not json");
-		expect(readSessionTabs(cwd)).toEqual([]);
-	});
-
-	it("returns an empty list when the file is missing", () => {
-		expect(fs.existsSync(tabsPath())).toBe(false);
-		expect(readSessionTabs(cwd)).toEqual([]);
-	});
-
-	it("drops entries without a sessionID", () => {
-		writeTabs({
-			cwd: {
-				[cwd]: { tabs: [{ title: "No id" }, { sessionID: "ses_a", title: "A" }] },
-			},
-		});
-		expect(readSessionTabs(cwd)).toEqual([{ id: "ses_a", title: "A" }]);
 	});
 });

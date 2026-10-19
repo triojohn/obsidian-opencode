@@ -25387,23 +25387,6 @@ function coerceTab(value) {
   const title = typeof value.title === "string" ? value.title : value.sessionID;
   return { sessionID: value.sessionID, title };
 }
-function normalizeCwd(cwd) {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-}
-function readSessionTabs(cwd) {
-  try {
-    const raw = JSON.parse(fs7.readFileSync(tabsFilePath(), "utf8"));
-    if (!isRecord2(raw) || !isRecord2(raw.cwd)) return [];
-    const target = normalizeCwd(cwd);
-    const key = Object.keys(raw.cwd).find((candidate) => normalizeCwd(candidate) === target);
-    if (key === void 0) return [];
-    const bucket = raw.cwd[key];
-    if (!isRecord2(bucket) || !Array.isArray(bucket.tabs)) return [];
-    return bucket.tabs.map(coerceTab).filter((tab) => tab !== null).map((tab) => ({ id: tab.sessionID, title: tab.title }));
-  } catch (e) {
-    return [];
-  }
-}
 function mergeSessionTabs(cwd, sessions) {
   try {
     const wanted = sessions.filter((session) => session.id && session.id !== "new");
@@ -25552,14 +25535,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.addRibbonIcon("message-circle", "Opencode conversations", (evt) => {
       void this.activateConversationView();
     });
-    this.addRibbonIcon("link", "Insert OpenCode session link", () => {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
-      if (!view) {
-        new import_obsidian10.Notice("Open a Markdown note first");
-        return;
-      }
-      void this.insertActiveSessionLink(view.editor);
-    });
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       if (!(file instanceof import_obsidian10.TFile) && !(file instanceof import_obsidian10.TFolder)) return;
       menu.addSeparator();
@@ -25630,15 +25605,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
         new import_obsidian10.Notice(message);
       }
     }));
-    this.addCommand({
-      id: "insert-session-link",
-      name: "Insert link to OpenCode session",
-      editorCheckCallback: (checking, editor, view) => {
-        if (!view.file || view.file.extension !== "md") return false;
-        if (!checking) void this.insertActiveSessionLink(editor);
-        return true;
-      }
-    });
     this.addSettingTab(new OpencodeSettingTab(this.app, this));
     this.registerEditorSuggest(new OpencodeEditorSuggest(this));
     this.logPtyHostDiagnostics();
@@ -25844,47 +25810,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
     const cwd = file ? path11.join(this.vaultRoot, path11.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
     await this.openTerminalForTarget(cwd, file ? file.path : null);
-  }
-  /**
-   * Insert a Markdown link to an OpenCode session for the active note's
-   * folder at the editor cursor.
-   *
-   * Prefers the per-file session (when the note lives in
-   * `fileSessionFolder`), then the folder's first TUI tab, then the most
-   * recently updated folder session.
-   */
-  async insertActiveSessionLink(editor) {
-    var _a;
-    const file = (_a = this.app.workspace.getActiveFile()) != null ? _a : this.lastActiveMarkdownFile;
-    const cwd = file ? path11.join(this.vaultRoot, path11.dirname(file.path)) : this.settings.defaultWorkingDirectory || this.vaultRoot;
-    const found = await this.findSessionForNote(cwd, file);
-    if (!found) {
-      new import_obsidian10.Notice("No OpenCode session found for this folder");
-      return;
-    }
-    const title = found.title.replace(/\]/g, "\\]");
-    editor.replaceSelection(`[${title}](${sessionUri(found.id, found.directory)})`);
-  }
-  /** Resolve which session a link in the active note should point at. */
-  async findSessionForNote(cwd, file) {
-    const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
-    if (file && folder) {
-      const posixPath = file.path.replace(/\\/g, "/");
-      if (path11.posix.dirname(posixPath) === folder) {
-        const name = path11.posix.basename(posixPath).replace(/\.[^./]+$/, "");
-        const session2 = (await this.listFolderSessions(cwd)).find((candidate) => candidate.title === name);
-        if (session2) {
-          return { id: session2.id, title: session2.title, directory: session2.directory };
-        }
-      }
-    }
-    const tab = readSessionTabs(cwd)[0];
-    if (tab) return { id: tab.id, title: tab.title, directory: cwd };
-    const session = (await this.listFolderSessions(cwd))[0];
-    if (session) {
-      return { id: session.id, title: session.title, directory: session.directory };
-    }
-    return null;
   }
   /**
    * Open the terminal rooted at `cwd`, resuming the folder's most recently
