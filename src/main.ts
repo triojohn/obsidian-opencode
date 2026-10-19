@@ -40,6 +40,8 @@ export default class OpencodePlugin extends Plugin {
 	private statusRefreshPending = false;
 	private unloading = false;
 	private lastActiveMarkdownFile: TFile | null = null;
+	private ready: Promise<void> = Promise.resolve();
+	private resolveReady: (() => void) | null = null;
 
 	get pendingPrompt(): string | null {
 		return this.sessionState.pendingPrompt;
@@ -82,6 +84,14 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	async onload() {
+		this.ready = new Promise<void>((resolve) => {
+			this.resolveReady = resolve;
+		});
+		// Registered before any await: a cold-start obsidian:// request must not be lost.
+		this.registerObsidianProtocolHandler("opencode", (params) => {
+			void this.ready.then(() => this.openSessionFromUri(params));
+		});
+
 		this.sessionState = new SessionState();
 		this.viewCoordinator = new ViewCoordinator(this.app.workspace, {
 			terminalViewType: OPENCODE_TERMINAL_VIEW_TYPE,
@@ -194,6 +204,7 @@ export default class OpencodePlugin extends Plugin {
 		this.registerEditorSuggest(new OpencodeEditorSuggest(this));
 
 		this.logPtyHostDiagnostics();
+		this.resolveReady?.();
 	}
 
 	async loadSettings() {

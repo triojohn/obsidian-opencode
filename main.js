@@ -25468,6 +25468,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.statusRefreshPending = false;
     this.unloading = false;
     this.lastActiveMarkdownFile = null;
+    this.ready = Promise.resolve();
+    this.resolveReady = null;
   }
   get pendingPrompt() {
     return this.sessionState.pendingPrompt;
@@ -25500,6 +25502,13 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.sessionState.pendingRouteSessionId = value;
   }
   async onload() {
+    var _a;
+    this.ready = new Promise((resolve4) => {
+      this.resolveReady = resolve4;
+    });
+    this.registerObsidianProtocolHandler("opencode", (params) => {
+      void this.ready.then(() => this.openSessionFromUri(params));
+    });
     this.sessionState = new SessionState();
     this.viewCoordinator = new ViewCoordinator(this.app.workspace, {
       terminalViewType: OPENCODE_TERMINAL_VIEW_TYPE,
@@ -25596,8 +25605,8 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     });
     this.addCommand(activeLineReferenceCommand({
       findTerminal: () => {
-        var _a;
-        const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
+        var _a2;
+        const view = (_a2 = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a2.view;
         return view instanceof OpencodeTerminalView ? view : null;
       },
       revealTerminal: () => this.activateTerminalView(),
@@ -25608,6 +25617,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.addSettingTab(new OpencodeSettingTab(this.app, this));
     this.registerEditorSuggest(new OpencodeEditorSuggest(this));
     this.logPtyHostDiagnostics();
+    (_a = this.resolveReady) == null ? void 0 : _a.call(this);
   }
   async loadSettings() {
     const data = await this.loadData();
