@@ -25561,9 +25561,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       OPENCODE_CONVERSATION_VIEW_TYPE,
       (leaf) => new OpencodeConversationView(leaf, this)
     );
-    this.registerObsidianProtocolHandler("opencode", (params) => {
-      void this.openSessionFromUri(params);
-    });
     (0, import_obsidian10.addIcon)(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
     this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt) => {
       void this.openActiveNoteTerminal();

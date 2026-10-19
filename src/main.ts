@@ -121,10 +121,6 @@ export default class OpencodePlugin extends Plugin {
 			(leaf) => new OpencodeConversationView(leaf, this)
 		);
 
-		this.registerObsidianProtocolHandler("opencode", (params) => {
-			void this.openSessionFromUri(params);
-		});
-
 		addIcon(OPENCODE_ICON_ID, OPENCODE_ICON_SVG);
 		this.addRibbonIcon(OPENCODE_ICON_ID, "Opencode terminal", (evt: MouseEvent) => {
 			void this.openActiveNoteTerminal();
