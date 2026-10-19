@@ -23210,24 +23210,6 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
       paste: (text) => terminal.paste(text)
     });
   }
-  /**
-   * Runs `run` against the running TUI's input stream.
-   *
-   * Returns false when the view cannot accept injected input — closed, no
-   * terminal, dead PTY, or a TUI that is still initialising — so the caller
-   * falls back to restarting the process.
-   *
-   * Args:
-   *   run: Receives a raw input sink; awaited to completion.
-   */
-  async driveInput(run) {
-    const terminal = this.terminal;
-    const stdin = this.ptySession.getStdin();
-    if (this.closing || !terminal || !stdin || !stdin.writable || stdin.destroyed) return false;
-    if (!this.ptySession.isTuiReady) return false;
-    await run((data) => this.ptySession.writeStdin(data));
-    return true;
-  }
   focusTerminal() {
     var _a;
     if (this.closing || this.app.workspace.getActiveViewOfType(_OpencodeTerminalView) !== this) return;
@@ -24263,7 +24245,7 @@ var OpencodeConversationView = class extends import_obsidian6.ItemView {
     const actions = this.detailContainer.createDiv({ cls: "opencode-session-actions" });
     const restoreBtn = actions.createEl("button", { text: "Restore in terminal", cls: "mod-cta" });
     restoreBtn.addEventListener("click", () => {
-      void this.plugin.openTerminalWithSession(session.id, session.directory, session.title);
+      void this.plugin.openTerminalWithSession(session.id, session.directory);
     });
     const copyLinkBtn = actions.createEl("button", { text: "Copy link" });
     copyLinkBtn.addEventListener("click", () => {
@@ -25162,10 +25144,6 @@ Error: ${err.message}\r
     var _a, _b;
     return (_b = (_a = this.ptyProcess) == null ? void 0 : _a.stdin) != null ? _b : null;
   }
-  /** True when the TUI is warm and still running, so input can be injected. */
-  get isTuiReady() {
-    return this.tuiReady && this.ptyProcess !== null;
-  }
   /**
    * Runs `callback` once the TUI is warm enough to accept injected input.
    *
@@ -25471,34 +25449,6 @@ function planTerminalOpen(attachPath, resumeSessionId) {
     kind: resumeSessionId ? "resume" : "new",
     attachPath: attachPath ? attachPath : null
   };
-}
-
-// src/modules/tuiInput.ts
-var TUI_SESSION_PICKER_KEY = "";
-var TUI_SESSION_PICKER_DELAY_MS = 1500;
-var TUI_SESSION_FILTER_DELAY_MS = 500;
-var TUI_NEW_SESSION_DELAY_MS = 800;
-var TUI_INPUT_GAP_MS = 250;
-function tuiDelay(ms) {
-  return new Promise((resolve4) => {
-    const host = typeof window === "undefined" ? globalThis : window;
-    host.setTimeout(resolve4, ms);
-  });
-}
-async function runCommand(write, text, delay = tuiDelay, gapMs = TUI_INPUT_GAP_MS) {
-  write(text);
-  await delay(gapMs);
-  write("\r");
-}
-async function openSessionInTui(write, title, delay = tuiDelay) {
-  write(TUI_SESSION_PICKER_KEY);
-  await delay(TUI_SESSION_PICKER_DELAY_MS);
-  await runCommand(write, title, delay, TUI_SESSION_FILTER_DELAY_MS);
-}
-async function startNewSessionInTui(write, attachPath, delay = tuiDelay) {
-  await runCommand(write, "/new", delay);
-  await delay(TUI_NEW_SESSION_DELAY_MS);
-  if (attachPath) write(`@${attachPath}`);
 }
 
 // src/main.ts
@@ -25816,38 +25766,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     this.sessionState.setContinueLastSession();
     await this.openOrRestartTerminal();
   }
-  /**
-   * Opens a session in the terminal.
-   *
-   * When a TUI is already running and the session title is known, the running
-   * TUI is driven through its session picker instead of restarting the
-   * process. Everything else falls back to a restart with `-s`.
-   *
-   * Args:
-   *   sessionId: Session to open.
-   *   directory: Session working directory.
-   *   title: Session title, used to filter the running TUI's session list.
-   */
-  async openTerminalWithSession(sessionId, directory, title) {
-    if (title && await this.driveRunningTui((write) => openSessionInTui(write, title))) return;
+  async openTerminalWithSession(sessionId, directory) {
     this.sessionState.setOpenSession(sessionId, directory);
     await this.openOrRestartTerminal();
-  }
-  /**
-   * Runs `drive` against the running terminal's input stream.
-   *
-   * Returns false when there is no terminal or it cannot accept injected
-   * input, so the caller can fall back to restarting the PTY.
-   *
-   * Args:
-   *   drive: Receives a raw input sink; awaited to completion.
-   */
-  async driveRunningTui(drive) {
-    var _a;
-    const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
-    if (!(view instanceof OpencodeTerminalView)) return false;
-    await this.activateTerminalView();
-    return view.driveInput(drive);
   }
   /**
    * Handle an `obsidian://opencode?session=<id>[&directory=<dir>]` link.
@@ -25862,17 +25783,16 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       new import_obsidian10.Notice("OpenCode: session id missing in link");
       return;
     }
-    const session = await this.resolveSession(sessionId);
-    const directory = ((_b = params.directory) == null ? void 0 : _b.trim()) || (session == null ? void 0 : session.directory);
+    const directory = ((_b = params.directory) == null ? void 0 : _b.trim()) || await this.resolveSessionDirectory(sessionId);
     if (!directory) {
       new import_obsidian10.Notice(`OpenCode session not found: ${sessionId}`);
       return;
     }
-    await this.openTerminalWithSession(sessionId, directory, session == null ? void 0 : session.title);
+    await this.openTerminalWithSession(sessionId, directory);
   }
-  /** Look up a session's directory and title, or null when it is unknown. */
-  async resolveSession(sessionId) {
-    var _a;
+  /** Look up a session's working directory, or null when it is unknown. */
+  async resolveSessionDirectory(sessionId) {
+    var _a, _b;
     const cwd = this.settings.defaultWorkingDirectory || this.vaultRoot;
     try {
       const client = new OpencodeClient(
@@ -25882,9 +25802,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       );
       const compatibility = await client.checkCompatibility();
       const sessions = await client.listSessions(compatibility.generation);
-      return (_a = sessions.find((session) => session.id === sessionId)) != null ? _a : null;
+      return (_b = (_a = sessions.find((session) => session.id === sessionId)) == null ? void 0 : _a.directory) != null ? _b : null;
     } catch (error) {
-      console.debug("Unable to resolve OpenCode session", error);
+      console.debug("Unable to resolve OpenCode session directory", error);
       return null;
     }
   }
@@ -25908,7 +25828,7 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
    * `@path` mention in the composer.
    */
   async openTerminalForTarget(cwd, attachPath) {
-    var _a, _b, _c;
+    var _a, _b;
     if (attachPath && await this.openFileSessionIfConfigured(cwd, attachPath)) return;
     const sessions = await this.listFolderSessions(cwd);
     const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
@@ -25916,28 +25836,15 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const recentTabs = this.settings.recentTabsCount > 0 ? sessions.slice(0, this.settings.recentTabsCount).map((session) => ({ id: session.id, title: session.title })) : null;
     if (recentTabs) mergeSessionTabs(cwd, recentTabs);
     const plan = planTerminalOpen(attachPath, resumeId);
-    const title = resumeId ? (_c = sessions.find((session) => session.id === resumeId)) == null ? void 0 : _c.title : void 0;
     if (plan.kind === "resume" && resumeId) {
-      const driven = title ? await this.driveRunningTui(async (write) => {
-        await openSessionInTui(write, title);
-        if (plan.attachPath) write(`@${plan.attachPath}`);
-      }) : false;
-      if (!driven) {
-        this.sessionState.setOpenSession(resumeId, cwd);
-        this.pendingRouteSessionId = resumeId;
-        this.pendingAttachPath = plan.attachPath;
-        await this.openOrRestartTerminal();
-      }
+      this.sessionState.setOpenSession(resumeId, cwd);
+      this.pendingRouteSessionId = resumeId;
     } else {
-      const driven = await this.driveRunningTui((write) => startNewSessionInTui(write, plan.attachPath));
-      if (!driven) {
-        this.sessionState.setNewSession();
-        this.sessionCwd = cwd;
-        this.pendingAttachPath = plan.attachPath;
-        await this.openOrRestartTerminal();
-      }
+      this.sessionState.setNewSession();
+      this.sessionCwd = cwd;
     }
-    this.pendingAttachPath = null;
+    this.pendingAttachPath = plan.attachPath;
+    await this.openOrRestartTerminal();
     if (recentTabs) {
       this.registerInterval(window.setTimeout(() => {
         if (this.unloading) return;
@@ -25978,13 +25885,6 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
         this.settings.environmentVariables
       );
       const found = await client.findSessionByTitle(name, cwd);
-      if (found) {
-        const driven = await this.driveRunningTui(async (write) => {
-          await openSessionInTui(write, found.title || name);
-          write(`@${attachPath}`);
-        });
-        if (driven) return true;
-      }
       const session = found != null ? found : await client.createSession({ title: name, directory: cwd });
       const plan = planTerminalOpen(attachPath, session.id);
       this.sessionState.setOpenSession(session.id, cwd);

@@ -665,11 +665,6 @@ export class PtySession {
 		return this.ptyProcess?.stdin ?? null;
 	}
 
-	/** True when the TUI is warm and still running, so input can be injected. */
-	get isTuiReady(): boolean {
-		return this.tuiReady && this.ptyProcess !== null;
-	}
-
 	/**
 	 * Runs `callback` once the TUI is warm enough to accept injected input.
 	 *

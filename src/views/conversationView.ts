@@ -259,7 +259,7 @@ export class OpencodeConversationView extends ItemView {
 
 		const restoreBtn = actions.createEl("button", { text: "Restore in terminal", cls: "mod-cta" });
 		restoreBtn.addEventListener("click", () => {
-			void this.plugin.openTerminalWithSession(session.id, session.directory, session.title);
+			void this.plugin.openTerminalWithSession(session.id, session.directory);
 		});
 
 		const copyLinkBtn = actions.createEl("button", { text: "Copy link" });

@@ -111,25 +111,6 @@ export class OpencodeTerminalView extends ItemView {
 		});
 	}
 
-	/**
-	 * Runs `run` against the running TUI's input stream.
-	 *
-	 * Returns false when the view cannot accept injected input — closed, no
-	 * terminal, dead PTY, or a TUI that is still initialising — so the caller
-	 * falls back to restarting the process.
-	 *
-	 * Args:
-	 *   run: Receives a raw input sink; awaited to completion.
-	 */
-	async driveInput(run: (write: (data: string) => void) => Promise<void>): Promise<boolean> {
-		const terminal = this.terminal;
-		const stdin = this.ptySession.getStdin();
-		if (this.closing || !terminal || !stdin || !stdin.writable || stdin.destroyed) return false;
-		if (!this.ptySession.isTuiReady) return false;
-		await run((data) => this.ptySession.writeStdin(data));
-		return true;
-	}
-
 	focusTerminal(): void {
 		// revealLeaf has finished loading the view. Focus immediately so later
 		// note navigation, sidebar collapse, and PTY startup cannot steal focus.
