@@ -1,4 +1,4 @@
-import { Plugin, FileSystemAdapter, Notice, Platform, addIcon, setIcon, TFile, TFolder } from "obsidian";
+import { Plugin, FileSystemAdapter, Notice, Platform, addIcon, setIcon, TFile, TFolder, Editor, MarkdownView } from "obsidian";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { OpencodePluginSettings, DEFAULT_SETTINGS } from "./settings";
@@ -15,7 +15,8 @@ import { OpencodeClient } from "./utils/opencode";
 import type { OpencodeSession } from "./utils/opencode";
 import { activeLineReferenceCommand } from "./modules/activeLineReference";
 import { OPENCODE_ICON_ID, OPENCODE_ICON_SVG } from "./icons";
-import { mergeSessionTabs } from "./utils/sessionTabs";
+import { mergeSessionTabs, readSessionTabs } from "./utils/sessionTabs";
+import { sessionUri } from "./modules/sessionUri";
 import { resolvePluginDirectory } from "./utils/path";
 import { planTerminalOpen } from "./modules/terminalOpenPlan";
 
@@ -124,6 +125,15 @@ export default class OpencodePlugin extends Plugin {
 			void this.activateConversationView();
 		});
 
+		this.addRibbonIcon("link", "Insert OpenCode session link", () => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) {
+				new Notice("Open a Markdown note first");
+				return;
+			}
+			void this.insertActiveSessionLink(view.editor);
+		});
+
 		this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
 			if (!(file instanceof TFile) && !(file instanceof TFolder)) return;
 			menu.addSeparator();
@@ -188,6 +198,16 @@ export default class OpencodePlugin extends Plugin {
 			revealTerminal: () => this.activateTerminalView(),
 			notice: (message) => { new Notice(message); },
 		}));
+
+		this.addCommand({
+			id: "insert-session-link",
+			name: "Insert link to OpenCode session",
+			editorCheckCallback: (checking, editor, view) => {
+				if (!view.file || view.file.extension !== "md") return false;
+				if (!checking) void this.insertActiveSessionLink(editor);
+				return true;
+			},
+		});
 
 		this.addSettingTab(new OpencodeSettingTab(this.app, this));
 
@@ -418,6 +438,57 @@ export default class OpencodePlugin extends Plugin {
 			: this.settings.defaultWorkingDirectory || this.vaultRoot;
 
 		await this.openTerminalForTarget(cwd, file ? file.path : null);
+	}
+
+	/**
+	 * Insert a Markdown link to an OpenCode session for the active note's
+	 * folder at the editor cursor.
+	 *
+	 * Prefers the per-file session (when the note lives in
+	 * `fileSessionFolder`), then the folder's first TUI tab, then the most
+	 * recently updated folder session.
+	 */
+	async insertActiveSessionLink(editor: Editor): Promise<void> {
+		const file = this.app.workspace.getActiveFile() ?? this.lastActiveMarkdownFile;
+		const cwd = file
+			? path.join(this.vaultRoot, path.dirname(file.path))
+			: this.settings.defaultWorkingDirectory || this.vaultRoot;
+
+		const found = await this.findSessionForNote(cwd, file);
+		if (!found) {
+			new Notice("No OpenCode session found for this folder");
+			return;
+		}
+		const title = found.title.replace(/\]/g, "\\]");
+		editor.replaceSelection(`[${title}](${sessionUri(found.id, found.directory)})`);
+	}
+
+	/** Resolve which session a link in the active note should point at. */
+	private async findSessionForNote(
+		cwd: string,
+		file: TFile | null,
+	): Promise<{ id: string; title: string; directory: string } | null> {
+		const folder = this.settings.fileSessionFolder.trim().replace(/[\\/]+$/, "");
+		if (file && folder) {
+			const posixPath = file.path.replace(/\\/g, "/");
+			if (path.posix.dirname(posixPath) === folder) {
+				const name = path.posix.basename(posixPath).replace(/\.[^./]+$/, "");
+				const session = (await this.listFolderSessions(cwd))
+					.find((candidate) => candidate.title === name);
+				if (session) {
+					return { id: session.id, title: session.title, directory: session.directory };
+				}
+			}
+		}
+
+		const tab = readSessionTabs(cwd)[0];
+		if (tab) return { id: tab.id, title: tab.title, directory: cwd };
+
+		const session = (await this.listFolderSessions(cwd))[0];
+		if (session) {
+			return { id: session.id, title: session.title, directory: session.directory };
+		}
+		return null;
 	}
 
 	/**

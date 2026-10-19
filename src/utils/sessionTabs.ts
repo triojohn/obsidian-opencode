@@ -54,6 +54,35 @@ function coerceTab(value: unknown): SessionTab | null {
 	return { sessionID: value.sessionID, title };
 }
 
+/** Normalize a cwd key for comparison across case and slash style. */
+function normalizeCwd(cwd: string): string {
+	return cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * Read the OpenCode TUI tab list for `cwd`.
+ *
+ * Best-effort: a missing file, broken JSON, or absent bucket yields `[]`.
+ * Entries without a `sessionID` are dropped.
+ */
+export function readSessionTabs(cwd: string): SessionTabEntry[] {
+	try {
+		const raw = JSON.parse(fs.readFileSync(tabsFilePath(), "utf8")) as unknown;
+		if (!isRecord(raw) || !isRecord(raw.cwd)) return [];
+		const target = normalizeCwd(cwd);
+		const key = Object.keys(raw.cwd).find((candidate) => normalizeCwd(candidate) === target);
+		if (key === undefined) return [];
+		const bucket = raw.cwd[key];
+		if (!isRecord(bucket) || !Array.isArray(bucket.tabs)) return [];
+		return bucket.tabs
+			.map(coerceTab)
+			.filter((tab): tab is SessionTab => tab !== null)
+			.map((tab) => ({ id: tab.sessionID, title: tab.title }));
+	} catch {
+		return [];
+	}
+}
+
 /**
  * Add `sessions` to the OpenCode TUI tab bar entry for `cwd`.
  *
