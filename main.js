@@ -21066,17 +21066,22 @@ function captureLineReference(filePath, from, to) {
   const endLine = to.line > from.line && to.ch === 0 ? to.line - 1 : to.line;
   return { filePath, lineStart: from.line + 1, lineEnd: endLine + 1 };
 }
+function deliverFileAttachment(filePath, context) {
+  if (!context.ready) return false;
+  const range = context.range;
+  if (/[\s@]/.test(filePath) || hasControlCharacter(filePath)) {
+    context.paste(` File ${JSON.stringify(filePath)}${range ? ` (lines ${range})` : ""} `);
+    return "text";
+  }
+  context.paste(` @${filePath}${range ? `#${range}` : ""}`);
+  return "mention";
+}
 function deliverLineReference(reference, context) {
   var _a;
   if (!context.ready) return false;
   if ((_a = context.notify) == null ? void 0 : _a.call(context, reference)) return "bridge";
   const range = reference.lineStart === reference.lineEnd ? String(reference.lineStart) : `${reference.lineStart}-${reference.lineEnd}`;
-  if (/[\s@]/.test(reference.filePath) || hasControlCharacter(reference.filePath)) {
-    context.paste(` File ${JSON.stringify(reference.filePath)} (lines ${range}) `);
-    return "text";
-  }
-  context.paste(` @${reference.filePath}#${range}`);
-  return "mention";
+  return deliverFileAttachment(reference.filePath, { ready: true, paste: context.paste, range });
 }
 function activeLineReferenceCommand(context) {
   return {
@@ -23196,6 +23201,38 @@ var OpencodeTerminalView = class _OpencodeTerminalView extends import_obsidian4.
       // xterm remains the sole ordered input producer; never write to the PTY.
       paste: (text) => terminal.paste(text)
     });
+  }
+  /** Paste `text` into the composer of the running TUI. */
+  insertComposerText(text) {
+    const paste = this.composerPaste();
+    if (!paste) return false;
+    this.focusTerminal();
+    paste(text);
+    return true;
+  }
+  /**
+   * Attach a file to the running TUI by pasting `@vaultPath` into the composer.
+   *
+   * Args:
+   *   vaultPath: Vault-relative path of the note to attach.
+   *
+   * Returns:
+   *   True when the mention was pasted; false when the TUI is not ready.
+   */
+  insertFileReference(vaultPath) {
+    const paste = this.composerPaste();
+    if (!paste) return false;
+    this.focusTerminal();
+    return deliverFileAttachment(vaultPath, { ready: true, paste }) !== false;
+  }
+  /** Terminal paste sink, or null when the TUI cannot take input. */
+  composerPaste() {
+    const terminal = this.terminal;
+    const stdin = this.ptySession.getStdin();
+    if (this.closing || !this.isTuiReady || !terminal || !stdin || !stdin.writable || stdin.destroyed) {
+      return null;
+    }
+    return (text) => terminal.paste(text);
   }
   focusTerminal() {
     var _a;
@@ -25453,6 +25490,11 @@ async function requestNewSession() {
 function normalizeDirectory2(directory) {
   return path11.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
+var SESSION_SWITCH_SETTLE_MS = 700;
+var NEW_SESSION_SETTLE_MS = 900;
+function sleep(ms) {
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
+}
 var OpencodePlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
@@ -25756,10 +25798,17 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     await this.viewCoordinator.toggleTerminalSidebar();
   }
   async newSession() {
-    if (this.runningTuiLive()) {
+    const view = this.liveTerminal();
+    if (view) {
       await this.activateTerminalView();
+      const prompt = this.pendingPrompt;
       try {
         await requestNewSession();
+        if (prompt) {
+          this.pendingPrompt = null;
+          await sleep(NEW_SESSION_SETTLE_MS);
+          view.insertComposerText(prompt);
+        }
         return;
       } catch (error) {
         console.debug("Falling back to a terminal restart", error);
@@ -25779,9 +25828,35 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
   }
   /** True when the terminal view has a live, input-ready PTY. */
   runningTuiLive() {
+    return this.liveTerminal() !== null;
+  }
+  /** The terminal view when its PTY is alive and ready for input. */
+  liveTerminal() {
     var _a;
     const view = (_a = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]) == null ? void 0 : _a.view;
-    return view instanceof OpencodeTerminalView && view.isTuiReady;
+    return view instanceof OpencodeTerminalView && view.isTuiReady ? view : null;
+  }
+  /**
+   * Switch the running TUI to `resumeId` (or a new session) and attach a note.
+   *
+   * Returns false when the TUI is not live, runs in another project, or the
+   * command file cannot be written; the caller then restarts the terminal.
+   */
+  async openInRunningTui(cwd, resumeId, attachPath, settleMs) {
+    const view = this.liveTerminal();
+    if (!view || !shouldSwitchRunningTui(true, this.currentTuiCwd, cwd, this.vaultRoot)) return false;
+    await this.activateTerminalView();
+    try {
+      await (resumeId ? requestSessionSwitch(resumeId) : requestNewSession());
+    } catch (error) {
+      console.debug("Falling back to a terminal restart", error);
+      return false;
+    }
+    if (attachPath) {
+      await sleep(settleMs != null ? settleMs : resumeId ? SESSION_SWITCH_SETTLE_MS : NEW_SESSION_SETTLE_MS);
+      view.insertFileReference(attachPath);
+    }
+    return true;
   }
   /**
    * Hand a session switch to the running TUI when it lives in `directory`.
@@ -25865,16 +25940,15 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
     const sessions = await this.listFolderSessions(cwd);
     const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1e3;
     const resumeId = (_b = (_a = sessions.find((session) => session.updated >= threshold)) == null ? void 0 : _a.id) != null ? _b : null;
-    const plan = planTerminalOpen(attachPath, resumeId);
-    if (plan.kind === "resume" && resumeId) {
-      if (!plan.attachPath && await this.switchRunningTui(resumeId, cwd)) return;
+    if (await this.openInRunningTui(cwd, resumeId, attachPath)) return;
+    if (resumeId) {
       this.sessionState.setOpenSession(resumeId, cwd);
       this.pendingRouteSessionId = resumeId;
     } else {
       this.sessionState.setNewSession();
       this.sessionCwd = cwd;
     }
-    this.pendingAttachPath = plan.attachPath;
+    this.pendingAttachPath = attachPath;
     await this.openOrRestartTerminal();
   }
   /**
@@ -25910,7 +25984,9 @@ var OpencodePlugin = class extends import_obsidian10.Plugin {
       );
       const found = await client.findSessionByTitle(name, cwd);
       const session = found != null ? found : await client.createSession({ title: name, directory: cwd });
-      if (found && await this.switchRunningTui(found.id, cwd)) return true;
+      if (await this.openInRunningTui(cwd, session.id, attachPath, found ? SESSION_SWITCH_SETTLE_MS : NEW_SESSION_SETTLE_MS)) {
+        return true;
+      }
       const plan = planTerminalOpen(attachPath, session.id);
       this.sessionState.setOpenSession(session.id, cwd);
       this.pendingRouteSessionId = session.id;

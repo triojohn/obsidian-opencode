@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Editor, MarkdownView } from "obsidian";
 import { join, parse } from "node:path";
-import { absoluteLineReference, activeLineReferenceCommand, captureLineReference, deliverLineReference } from "./activeLineReference";
+import { absoluteLineReference, activeLineReferenceCommand, captureLineReference, deliverFileAttachment, deliverLineReference } from "./activeLineReference";
 
 describe("active note line references", () => {
 	it("converts the cursor and primary selection to inclusive one-based ranges", () => {
@@ -46,8 +46,7 @@ describe("active note line references", () => {
 		expect(paste).toHaveBeenLastCalledWith(' File "/vault/@note.md" (lines 5) ');
 	});
 
-	it("does not send to any transport when the embedded process is unavailable", () => {
-		const notify = vi.fn(() => true);
+	it("does not send to any transport when the embedded process is unavailable", () => {		const notify = vi.fn(() => true);
 		const paste = vi.fn();
 		expect(deliverLineReference({ filePath: "a.md", lineStart: 1, lineEnd: 1 }, { ready: false, notify, paste })).toBe(false);
 		expect(notify).not.toHaveBeenCalled();
@@ -83,5 +82,32 @@ describe("active note line references", () => {
 		command.editorCheckCallback!(false, editor, { file: { extension: "md", path: "a.md" } } as unknown as MarkdownView);
 		expect(notice).toHaveBeenCalledWith("Open or restart the OpenCode terminal before adding a line reference.");
 		expect(revealTerminal).not.toHaveBeenCalled();
+	});
+});
+
+describe("deliverFileAttachment", () => {
+	it("pastes the vault path as a bare @mention without a line range", () => {
+		const paste = vi.fn();
+		expect(deliverFileAttachment("notes/active.md", { ready: true, paste })).toBe("mention");
+		expect(paste).toHaveBeenCalledExactlyOnceWith(" @notes/active.md");
+	});
+
+	it("keeps a line range when one is given", () => {
+		const paste = vi.fn();
+		expect(deliverFileAttachment("/vault/a.md", { ready: true, paste, range: "5-9" })).toBe("mention");
+		expect(paste).toHaveBeenCalledExactlyOnceWith(" @/vault/a.md#5-9");
+	});
+
+	it("falls back to quoted text for paths the autocomplete cannot parse", () => {
+		const paste = vi.fn();
+		expect(deliverFileAttachment("my 笔记.md", { ready: true, paste })).toBe("text");
+		expect(paste).toHaveBeenLastCalledWith(' File "my 笔记.md" ');
+		expect(deliverFileAttachment("@note.md", { ready: true, paste })).toBe("text");
+	});
+
+	it("stays silent when the TUI is not ready, so callers can restart instead", () => {
+		const paste = vi.fn();
+		expect(deliverFileAttachment("notes/active.md", { ready: false, paste })).toBe(false);
+		expect(paste).not.toHaveBeenCalled();
 	});
 });

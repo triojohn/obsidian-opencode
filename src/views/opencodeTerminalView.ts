@@ -9,7 +9,7 @@ import { ImageAddon } from "@xterm/addon-image";
 import { release, tmpdir } from "node:os";
 import { mkdtempSync, readdirSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { absoluteLineReference, deliverLineReference, FileLineReference, ReferenceDelivery } from "../modules/activeLineReference";
+import { absoluteLineReference, deliverFileAttachment, deliverLineReference, FileLineReference, ReferenceDelivery } from "../modules/activeLineReference";
 import type OpencodePlugin from "../main";
 import { handleTerminalDrop } from "../terminalDrop";
 import { EditorServer } from "../editorServer";
@@ -114,6 +114,42 @@ export class OpencodeTerminalView extends ItemView {
 			// xterm remains the sole ordered input producer; never write to the PTY.
 			paste: (text) => terminal!.paste(text),
 		});
+	}
+
+	/** Paste `text` into the composer of the running TUI. */
+	insertComposerText(text: string): boolean {
+		const paste = this.composerPaste();
+		if (!paste) return false;
+		this.focusTerminal();
+		paste(text);
+		return true;
+	}
+
+	/**
+	 * Attach a file to the running TUI by pasting `@vaultPath` into the composer.
+	 *
+	 * Args:
+	 *   vaultPath: Vault-relative path of the note to attach.
+	 *
+	 * Returns:
+	 *   True when the mention was pasted; false when the TUI is not ready.
+	 */
+	insertFileReference(vaultPath: string): boolean {
+		const paste = this.composerPaste();
+		if (!paste) return false;
+		this.focusTerminal();
+		return deliverFileAttachment(vaultPath, { ready: true, paste }) !== false;
+	}
+
+	/** Terminal paste sink, or null when the TUI cannot take input. */
+	private composerPaste(): ((text: string) => void) | null {
+		const terminal = this.terminal;
+		const stdin = this.ptySession.getStdin();
+		if (this.closing || !this.isTuiReady || !terminal || !stdin || !stdin.writable || stdin.destroyed) {
+			return null;
+		}
+		// xterm remains the sole ordered input producer; never write to the PTY.
+		return (text) => terminal.paste(text);
 	}
 
 	focusTerminal(): void {

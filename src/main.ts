@@ -26,6 +26,16 @@ function normalizeDirectory(directory: string): string {
 	return path.resolve(directory).replace(/[\\/]+$/, "").toLowerCase();
 }
 
+/** Time the TUI needs to finish a bridge session switch before accepting input. */
+const SESSION_SWITCH_SETTLE_MS = 700;
+
+/** Time the TUI needs to create a session before accepting input. */
+const NEW_SESSION_SETTLE_MS = 900;
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default class OpencodePlugin extends Plugin {
 	settings: OpencodePluginSettings;
 	vaultRoot: string = "";
@@ -361,10 +371,17 @@ export default class OpencodePlugin extends Plugin {
 	}
 
 	async newSession() {
-		if (this.runningTuiLive()) {
+		const view = this.liveTerminal();
+		if (view) {
 			await this.activateTerminalView();
+			const prompt = this.pendingPrompt;
 			try {
 				await requestNewSession();
+				if (prompt) {
+					this.pendingPrompt = null;
+					await sleep(NEW_SESSION_SETTLE_MS);
+					view.insertComposerText(prompt);
+				}
 				return;
 			} catch (error) {
 				console.debug("Falling back to a terminal restart", error);
@@ -387,8 +404,41 @@ export default class OpencodePlugin extends Plugin {
 
 	/** True when the terminal view has a live, input-ready PTY. */
 	private runningTuiLive(): boolean {
+		return this.liveTerminal() !== null;
+	}
+
+	/** The terminal view when its PTY is alive and ready for input. */
+	private liveTerminal(): OpencodeTerminalView | null {
 		const view = this.app.workspace.getLeavesOfType(OPENCODE_TERMINAL_VIEW_TYPE)[0]?.view;
-		return view instanceof OpencodeTerminalView && view.isTuiReady;
+		return view instanceof OpencodeTerminalView && view.isTuiReady ? view : null;
+	}
+
+	/**
+	 * Switch the running TUI to `resumeId` (or a new session) and attach a note.
+	 *
+	 * Returns false when the TUI is not live, runs in another project, or the
+	 * command file cannot be written; the caller then restarts the terminal.
+	 */
+	private async openInRunningTui(
+		cwd: string,
+		resumeId: string | null,
+		attachPath: string | null,
+		settleMs?: number,
+	): Promise<boolean> {
+		const view = this.liveTerminal();
+		if (!view || !shouldSwitchRunningTui(true, this.currentTuiCwd, cwd, this.vaultRoot)) return false;
+		await this.activateTerminalView();
+		try {
+			await (resumeId ? requestSessionSwitch(resumeId) : requestNewSession());
+		} catch (error) {
+			console.debug("Falling back to a terminal restart", error);
+			return false;
+		}
+		if (attachPath) {
+			await sleep(settleMs ?? (resumeId ? SESSION_SWITCH_SETTLE_MS : NEW_SESSION_SETTLE_MS));
+			view.insertFileReference(attachPath);
+		}
+		return true;
 	}
 
 	/**
@@ -478,18 +528,18 @@ export default class OpencodePlugin extends Plugin {
 		const threshold = Date.now() - this.settings.resumeWithinDays * 24 * 60 * 60 * 1000;
 		const resumeId = sessions.find((session) => session.updated >= threshold)?.id ?? null;
 
-		const plan = planTerminalOpen(attachPath, resumeId);
-		if (plan.kind === "resume" && resumeId) {
-			// A pre-filled note survives only a restart that runs the prefill
-			// step, so the bridge is used only when nothing has to be attached.
-			if (!plan.attachPath && await this.switchRunningTui(resumeId, cwd)) return;
+		// The running TUI switches in place and then takes the note as an
+		// `@path` mention, so an attach no longer forces a restart.
+		if (await this.openInRunningTui(cwd, resumeId, attachPath)) return;
+
+		if (resumeId) {
 			this.sessionState.setOpenSession(resumeId, cwd);
 			this.pendingRouteSessionId = resumeId;
 		} else {
 			this.sessionState.setNewSession();
 			this.sessionCwd = cwd;
 		}
-		this.pendingAttachPath = plan.attachPath;
+		this.pendingAttachPath = attachPath;
 
 		await this.openOrRestartTerminal();
 	}
@@ -528,9 +578,11 @@ export default class OpencodePlugin extends Plugin {
 			);
 			const found = await client.findSessionByTitle(name, cwd);
 			const session = found ?? await client.createSession({ title: name, directory: cwd });
-			// A per-file session that is already open in a live TUI is focused in
-			// place; the note is not pre-filled in that case.
-			if (found && await this.switchRunningTui(found.id, cwd)) return true;
+			// The per-file session is switched in place in a live TUI and the
+			// note is attached as an `@path` mention; no restart either way.
+			if (await this.openInRunningTui(cwd, session.id, attachPath, found ? SESSION_SWITCH_SETTLE_MS : NEW_SESSION_SETTLE_MS)) {
+				return true;
+			}
 			// The note is attached whether the per-file session was found or
 			// created, so resuming it still pre-fills the file.
 			const plan = planTerminalOpen(attachPath, session.id);

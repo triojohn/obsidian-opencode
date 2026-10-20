@@ -24,6 +24,38 @@ export function captureLineReference(filePath: string, from: EditorPosition, to:
 	return { filePath, lineStart: from.line + 1, lineEnd: endLine + 1 };
 }
 
+/**
+ * Paste an `@path` mention (optionally with a line range) into the composer.
+ *
+ * Args:
+ *   filePath: Vault-relative or absolute path to attach.
+ *   context: Delivery state; `range` is the `#start-end` suffix, if any.
+ *
+ * Returns:
+ *   "mention" when the path was pasted as an autocomplete trigger, "text"
+ *   when it had to be pasted verbatim, false when the terminal is not ready.
+ */
+export function deliverFileAttachment(
+	filePath: string,
+	context: {
+		ready: boolean;
+		paste: (text: string) => void;
+		range?: string;
+	},
+): ReferenceDelivery {
+	if (!context.ready) return false;
+	const range = context.range;
+	// Both v1 and v2 autocomplete parse #5-9. #L5-9 is not accepted by the TUI.
+	// Whitespace ends an autocomplete query, so preserve these paths as explicit
+	// text instead of creating an attachment that points to the wrong note.
+	if (/[\s@]/.test(filePath) || hasControlCharacter(filePath)) {
+		context.paste(` File ${JSON.stringify(filePath)}${range ? ` (lines ${range})` : ""} `);
+		return "text";
+	}
+	context.paste(` @${filePath}${range ? `#${range}` : ""}`);
+	return "mention";
+}
+
 export function deliverLineReference(
 	reference: FileLineReference,
 	context: {
@@ -37,15 +69,7 @@ export function deliverLineReference(
 	const range = reference.lineStart === reference.lineEnd
 		? String(reference.lineStart)
 		: `${reference.lineStart}-${reference.lineEnd}`;
-	// Both v1 and v2 autocomplete parse #5-9. #L5-9 is not accepted by the TUI.
-	// Whitespace ends an autocomplete query, so preserve these paths as explicit
-	// text instead of creating an attachment that points to the wrong note.
-	if (/[\s@]/.test(reference.filePath) || hasControlCharacter(reference.filePath)) {
-		context.paste(` File ${JSON.stringify(reference.filePath)} (lines ${range}) `);
-		return "text";
-	}
-	context.paste(` @${reference.filePath}#${range}`);
-	return "mention";
+	return deliverFileAttachment(reference.filePath, { ready: true, paste: context.paste, range });
 }
 
 export function activeLineReferenceCommand(context: {
